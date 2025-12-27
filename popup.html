@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amazon Scraper</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 400px;
+      min-height: 500px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #333;
+    }
+
+    .header {
+      background: white;
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .header h1 {
+      font-size: 20px;
+      color: #667eea;
+      margin-bottom: 5px;
+    }
+
+    .header p {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .stats {
+      display: flex;
+      justify-content: space-around;
+      padding: 15px;
+      background: rgba(255, 255, 255, 0.95);
+      margin: 10px;
+      border-radius: 8px;
+    }
+
+    .stat-item {
+      text-align: center;
+    }
+
+    .stat-number {
+      font-size: 24px;
+      font-weight: bold;
+      color: #667eea;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #666;
+      margin-top: 5px;
+    }
+
+    .controls {
+      padding: 10px;
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: white;
+      color: #667eea;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.9);
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: rgba(239, 68, 68, 1);
+    }
+
+    .products-container {
+      max-height: 350px;
+      overflow-y: auto;
+      padding: 10px;
+    }
+
+    .product-card {
+      background: white;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      transition: transform 0.2s;
+    }
+
+    .product-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .product-header {
+      display: flex;
+      gap: 10px;
+    }
+
+    .product-image {
+      width: 60px;
+      height: 60px;
+      object-fit: cover;
+      border-radius: 6px;
+      background: #f3f4f6;
+    }
+
+    .product-info {
+      flex: 1;
+    }
+
+    .product-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 5px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .product-price {
+      font-size: 14px;
+      font-weight: bold;
+      color: #10b981;
+      margin-bottom: 3px;
+    }
+
+    .product-asin {
+      font-size: 11px;
+      color: #666;
+    }
+
+    .product-actions {
+      display: flex;
+      gap: 5px;
+      margin-top: 10px;
+    }
+
+    .btn-small {
+      flex: 1;
+      padding: 6px;
+      border: none;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-view {
+      background: #3b82f6;
+      color: white;
+    }
+
+    .btn-delete {
+      background: #ef4444;
+      color: white;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: white;
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 10px;
+    }
+
+    .empty-state-text {
+      font-size: 14px;
+      opacity: 0.9;
+    }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.5);
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📦 Amazon to eBay Scraper</h1>
+    <p>Scrape products for dropshipping</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat-item">
+      <div class="stat-number" id="totalProducts">0</div>
+      <div class="stat-label">Products Scraped</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-number" id="totalImages">0</div>
+      <div class="stat-label">Total Images</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn btn-primary" id="exportBtn">Export All</button>
+    <button class="btn btn-danger" id="clearBtn">Clear All</button>
+  </div>
+
+  <div class="products-container" id="productsContainer">
+    <div class="empty-state">
+      <div class="empty-state-icon">🛍️</div>
+      <div class="empty-state-text">No products scraped yet.<br>Visit an Amazon product page and click "Scrape for eBay"</div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
