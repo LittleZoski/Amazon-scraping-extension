@@ -5,18 +5,28 @@ A browser extension for scraping Amazon product information to facilitate dropsh
 ## Features
 
 - **One-Click Scraping**: Click the floating "Scrape for eBay" button on any Amazon product page
+- **Bulk Scraping**: Scrape multiple products at once from category pages, bestsellers, and new releases
+- **Visual Progress Indicator**: Beautiful real-time progress UI showing success/fail counts and completion percentage
+- **Deep Scraping**: Fetches full product details including bulletPoints, specifications, and descriptions
+- **Automatic Data Sanitization**: Removes all Amazon branding, URLs, and references from product descriptions
+  - Keeps image URLs intact for eBay listing
+  - Cleans title, description, bullet points, and specifications
+  - Removes "Amazon", "Prime", "FBA", and Amazon-specific terms
 - **Comprehensive Data Extraction**: Captures:
-  - Product title
+  - Product title (sanitized)
   - Price
   - Multiple product images (up to 10)
-  - Description
-  - Bullet points
-  - Specifications
+  - Description (sanitized)
+  - Bullet points (sanitized)
+  - Specifications (sanitized)
   - ASIN
   - Product URL
+  - Rating (from category pages)
+- **Smart Page Detection**: Automatically detects product pages vs category pages
 - **Local Storage**: All scraped products are saved locally in the browser
 - **Product Management**: View, manage, and delete scraped products via the extension popup
 - **Export Functionality**: Export all scraped products as JSON for batch processing with eBay API
+- **Auto-Clear**: Automatically clears scraped products after export to keep things organized
 - **Multi-Region Support**: Works on Amazon.com, Amazon.co.uk, and Amazon.ca
 
 ## Installation
@@ -29,12 +39,27 @@ A browser extension for scraping Amazon product information to facilitate dropsh
 
 ## Usage
 
-### Scraping Products
+### Scraping Individual Products
 
 1. Navigate to any Amazon product page
 2. Look for the floating "📦 Scrape for eBay" button on the right side
 3. Click the button to scrape the product
 4. Wait for the success notification
+
+### Bulk Scraping from Category Pages
+
+1. Navigate to any Amazon category page:
+   - Search results (e.g., search for "wireless headphones")
+   - Best Sellers (e.g., `/gp/bestsellers`)
+   - New Releases (e.g., `/gp/new-releases`)
+   - Movers & Shakers
+   - Most Wished For
+2. The button will automatically change to "📦 Scrape X Items" (showing item count)
+3. Click to scrape all visible products on the page
+4. Watch the progress: "⏳ Scraping 5/24..."
+5. Get notification when complete
+
+**Pro Tip**: Scroll down on category pages to load more products before scraping!
 
 ### Managing Scraped Products
 
@@ -43,7 +68,8 @@ A browser extension for scraping Amazon product information to facilitate dropsh
 3. Click "View Details" to open the original Amazon page
 4. Click "Delete" to remove a product from your collection
 5. Click "Export All" to download all products as JSON
-6. Click "Clear All" to remove all scraped products
+   - Products are automatically cleared after export
+6. Click "Clear All" to manually remove all scraped products
 
 ### Exported Data Format
 

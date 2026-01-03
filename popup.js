@@ -85,8 +85,52 @@ class PopupManager {
 
   viewProduct(index) {
     const product = this.products[index];
+    this.showProductDetails(product);
+  }
+
+  showProductDetails(product) {
+    // Create modal overlay
+    const modal = document.createElement('div');
+    modal.className = 'product-details-modal';
+    modal.innerHTML = `
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Product Details</h2>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <pre class="json-display">${JSON.stringify(product, null, 2)}</pre>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-copy">Copy JSON</button>
+          ${product.url ? `<button class="btn-visit">Visit Amazon Page</button>` : ''}
+          <button class="btn-modal-close">Close</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Add event listeners
+    const closeModal = () => {
+      modal.remove();
+    };
+
+    modal.querySelector('.modal-close').addEventListener('click', closeModal);
+    modal.querySelector('.btn-modal-close').addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+
+    modal.querySelector('.btn-copy').addEventListener('click', () => {
+      navigator.clipboard.writeText(JSON.stringify(product, null, 2));
+      alert('JSON copied to clipboard!');
+    });
+
     if (product.url) {
-      chrome.tabs.create({ url: product.url });
+      modal.querySelector('.btn-visit').addEventListener('click', () => {
+        chrome.tabs.create({ url: product.url });
+      });
     }
   }
 
@@ -118,13 +162,22 @@ class PopupManager {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
     const filename = `amazon-products-${timestamp}.json`;
 
+    const productCount = this.products.length;
+
     chrome.downloads.download({
       url: url,
       filename: filename,
       saveAs: true
-    }, () => {
+    }, (downloadId) => {
       URL.revokeObjectURL(url);
-      alert(`Exported ${this.products.length} products to ${filename}`);
+
+      // Auto-clear products after successful export
+      this.products = [];
+      chrome.storage.local.set({ scrapedProducts: [] }, () => {
+        this.renderProducts();
+        this.updateStats();
+        alert(`✅ Exported ${productCount} products to ${filename}\n\nProducts have been cleared from the list.`);
+      });
     });
   }
 
