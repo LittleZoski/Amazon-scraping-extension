@@ -28,7 +28,8 @@
         "https://www.amazon.co.uk/*",
         "https://www.amazon.ca/*"
       ],
-      "js": ["content.js"]
+      "js": ["content.js"],
+      "run_at": "document_end"
     }
   ],
   "icons": {
