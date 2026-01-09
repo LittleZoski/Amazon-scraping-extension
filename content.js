@@ -1839,9 +1839,12 @@ class AmazonScraper {
         return false;
       };
 
+      // Format phone number to +1 xxx-xxx-xxxx
+      const formattedPhone = this.formatPhoneNumber(address.phoneNumber || '');
+
       // Fill in the form fields
       setValue(fieldMappings.fullName, address.name || '');
-      setValue(fieldMappings.phoneNumber, address.phoneNumber || '');
+      setValue(fieldMappings.phoneNumber, formattedPhone);
       setValue(fieldMappings.addressLine1, address.addressLine1 || '');
       setValue(fieldMappings.addressLine2, address.addressLine2 || '');
       setValue(fieldMappings.city, address.city || '');
@@ -1861,8 +1864,10 @@ class AmazonScraper {
 
       this.showNotification(`Importing address ${current} of ${total}...`, 'info');
 
-      // Show auto-submit button
-      this.showAutoSubmitControls(current, total);
+      // Auto-submit after a short delay to ensure form is fully populated
+      setTimeout(() => {
+        this.submitAddressAndNext();
+      }, 1500);
 
     } catch (error) {
       console.error('Error filling form:', error);
@@ -2077,6 +2082,28 @@ class AmazonScraper {
 
     console.warn('Could not set state dropdown for:', stateValue);
     return false;
+  }
+
+  formatPhoneNumber(phoneNumber) {
+    if (!phoneNumber) return '';
+
+    // Remove all non-digit characters
+    const digitsOnly = phoneNumber.replace(/\D/g, '');
+
+    // Handle different phone number formats
+    if (digitsOnly.length === 10) {
+      // US phone number without country code: 6127498677 -> +1 612-749-8677
+      return `+1 ${digitsOnly.substring(0, 3)}-${digitsOnly.substring(3, 6)}-${digitsOnly.substring(6)}`;
+    } else if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
+      // US phone number with country code: 16127498677 -> +1 612-749-8677
+      return `+1 ${digitsOnly.substring(1, 4)}-${digitsOnly.substring(4, 7)}-${digitsOnly.substring(7)}`;
+    } else if (digitsOnly.length === 11) {
+      // Other format with 11 digits
+      return `+1 ${digitsOnly.substring(1, 4)}-${digitsOnly.substring(4, 7)}-${digitsOnly.substring(7)}`;
+    } else {
+      // Fallback: return original if format is unexpected
+      return phoneNumber;
+    }
   }
 }
 
