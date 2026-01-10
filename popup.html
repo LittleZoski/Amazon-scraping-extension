@@ -343,34 +343,104 @@
     .btn-modal-close:hover {
       background: #4b5563;
     }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      background: white;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      background: white;
+      color: #6b7280;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      border-bottom: 3px solid transparent;
+    }
+
+    .tab-btn:hover {
+      background: #f9fafb;
+      color: #667eea;
+    }
+
+    .tab-btn.active {
+      color: #667eea;
+      border-bottom-color: #667eea;
+    }
+
+    .tab-content {
+      display: block;
+    }
+
+    .tab-content.hidden {
+      display: none;
+    }
   </style>
 </head>
 <body>
   <div class="header">
     <h1>📦 Amazon to eBay Scraper</h1>
-    <p>Scrape products for dropshipping</p>
+    <p>Scrape products & orders for export</p>
   </div>
 
-  <div class="stats">
-    <div class="stat-item">
-      <div class="stat-number" id="totalProducts">0</div>
-      <div class="stat-label">Products Scraped</div>
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="products">Products</button>
+    <button class="tab-btn" data-tab="orders">Orders</button>
+  </div>
+
+  <div class="tab-content" id="products-tab">
+    <div class="stats">
+      <div class="stat-item">
+        <div class="stat-number" id="totalProducts">0</div>
+        <div class="stat-label">Products Scraped</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-number" id="totalImages">0</div>
+        <div class="stat-label">Total Images</div>
+      </div>
     </div>
-    <div class="stat-item">
-      <div class="stat-number" id="totalImages">0</div>
-      <div class="stat-label">Total Images</div>
+
+    <div class="controls">
+      <button class="btn btn-primary" id="exportBtn">Export All</button>
+      <button class="btn btn-danger" id="clearBtn">Clear All</button>
+    </div>
+
+    <div class="products-container" id="productsContainer">
+      <div class="empty-state">
+        <div class="empty-state-icon">🛍️</div>
+        <div class="empty-state-text">No products scraped yet.<br>Visit an Amazon product page and click "Scrape for eBay"</div>
+      </div>
     </div>
   </div>
 
-  <div class="controls">
-    <button class="btn btn-primary" id="exportBtn">Export All</button>
-    <button class="btn btn-danger" id="clearBtn">Clear All</button>
-  </div>
+  <div class="tab-content hidden" id="orders-tab">
+    <div class="stats">
+      <div class="stat-item">
+        <div class="stat-number" id="totalOrders">0</div>
+        <div class="stat-label">Orders Scraped</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-number" id="totalEarnings">$0</div>
+        <div class="stat-label">Total Earnings</div>
+      </div>
+    </div>
 
-  <div class="products-container" id="productsContainer">
-    <div class="empty-state">
-      <div class="empty-state-icon">🛍️</div>
-      <div class="empty-state-text">No products scraped yet.<br>Visit an Amazon product page and click "Scrape for eBay"</div>
+    <div class="controls">
+      <button class="btn btn-primary" id="exportOrdersBtn">Export Orders</button>
+      <button class="btn btn-danger" id="clearOrdersBtn">Clear Orders</button>
+    </div>
+
+    <div class="products-container" id="ordersContainer">
+      <div class="empty-state">
+        <div class="empty-state-icon">📦</div>
+        <div class="empty-state-text">No orders scraped yet.<br>Visit an eBay order page and click "Scrape Order for Export"</div>
+      </div>
     </div>
   </div>
 
