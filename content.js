@@ -139,6 +139,8 @@ class AmazonScraper {
     return url.includes('/s?') ||
            url.includes('/s/') ||
            url.includes('/gp/bestsellers') ||
+           url.includes('/zgbs/') ||
+           url.includes('/Best-Sellers') ||
            url.includes('/gp/new-releases') ||
            url.includes('/gp/movers-and-shakers') ||
            url.includes('/gp/most-wished-for');
@@ -182,12 +184,16 @@ class AmazonScraper {
   }
 
   createSettingsModal(allProducts) {
-    // Extract price info from products
-    const productsWithPrices = allProducts.map(p => {
+    // Extract price and Prime info from products
+    const productsWithMetadata = allProducts.map(p => {
       const priceText = p.element?.querySelector('.a-price .a-offscreen, .a-price-whole, ._cDEzb_p13n-sc-price_3mJ9Z')?.textContent?.trim();
       const price = this.parsePrice(priceText);
-      return { ...p, price, priceText };
-    }).filter(p => p.price > 0); // Only products with valid prices
+      const isPrime = this.checkPrimeEligibilityFromElement(p.element);
+      return { ...p, price, priceText, isPrime };
+    });
+
+    const productsWithPrices = productsWithMetadata.filter(p => p.price > 0);
+    const primeProducts = productsWithMetadata.filter(p => p.isPrime);
 
     const prices = productsWithPrices.map(p => p.price);
     const minPrice = prices.length > 0 ? Math.floor(Math.min(...prices)) : 0;
@@ -274,7 +280,7 @@ class AmazonScraper {
             </div>
 
             <div style="font-size: 13px; color: #666; padding: 10px; background: white; border-radius: 6px;">
-              <span id="filtered-count">${allProducts.length}</span> products match filter
+              <span id="filtered-count">${allProducts.length}</span> products match filters
             </div>
           </div>
         </div>
@@ -290,6 +296,9 @@ class AmazonScraper {
           <p style="margin: 10px 0 0 28px; font-size: 12px; color: #666;">
             Only scrape products eligible for Amazon Prime shipping
           </p>
+          <div id="prime-filter-info" style="margin: 10px 0 0 28px; font-size: 13px; color: #1e40af; padding: 10px; background: white; border-radius: 6px; display: none;">
+            <span id="prime-count">${primeProducts.length}</span> Prime products found
+          </div>
         </div>
 
         <div style="display: flex; gap: 10px; margin-top: 25px;">
@@ -337,13 +346,21 @@ class AmazonScraper {
     const updateFilteredCount = () => {
       const minPrice = parseInt(minPriceSlider.value);
       const maxPrice = parseInt(maxPriceSlider.value);
+      const primeOnly = primeOnlyFilter.checked;
 
+      let filtered = productsWithMetadata;
+
+      // Apply price filter if enabled
       if (enablePriceFilter.checked) {
-        const filtered = productsWithPrices.filter(p => p.price >= minPrice && p.price <= maxPrice);
-        filteredCount.textContent = filtered.length;
-      } else {
-        filteredCount.textContent = allProducts.length;
+        filtered = filtered.filter(p => p.price >= minPrice && p.price <= maxPrice);
       }
+
+      // Apply Prime filter if enabled
+      if (primeOnly) {
+        filtered = filtered.filter(p => p.isPrime);
+      }
+
+      filteredCount.textContent = filtered.length;
     };
 
     minPriceSlider.addEventListener('input', (e) => {
@@ -368,6 +385,18 @@ class AmazonScraper {
 
     // Get Prime filter reference
     const primeOnlyFilter = modal.querySelector('#prime-only-filter');
+    const primeFilterInfo = modal.querySelector('#prime-filter-info');
+    const primeCount = modal.querySelector('#prime-count');
+
+    // Prime filter toggle
+    primeOnlyFilter.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        primeFilterInfo.style.display = 'block';
+      } else {
+        primeFilterInfo.style.display = 'none';
+      }
+      updateFilteredCount();
+    });
 
     // Start button
     startBtn.addEventListener('click', () => {
@@ -822,11 +851,47 @@ class AmazonScraper {
   }
 
   extractPriceFromDoc(doc) {
+    // PRIORITY 1: Try to get "Typical Price" or "List Price" (for eBay reselling)
+    const typicalPriceSelectors = [
+      // Typical price selectors
+      'span.a-price[data-a-color="secondary"] .a-offscreen',
+      '.a-price.a-text-price .a-offscreen',
+      'span:contains("Typical price") + .a-price .a-offscreen',
+      'span:contains("List Price") + .a-price .a-offscreen',
+      // Look for strikethrough prices (usually the original price)
+      '.a-text-price .a-offscreen'
+    ];
+
+    for (const selector of typicalPriceSelectors) {
+      const elements = doc.querySelectorAll(selector);
+      for (const element of elements) {
+        const priceText = element.textContent.trim();
+        // Make sure it's a valid price and not a unit price
+        if (priceText.includes('$') && /\$\d+\.\d{2}/.test(priceText)) {
+          // Check more thoroughly for unit pricing indicators
+          if (!this.isUnitPriceText(priceText, element)) {
+            return priceText;
+          }
+        }
+      }
+    }
+
+    // PRIORITY 2: Check for explicit "Typical:" or "List:" labels
+    const textContent = doc.body.textContent;
+    const typicalMatch = textContent.match(/Typical\s*price:\s*\$(\d+\.\d{2})/i);
+    if (typicalMatch) {
+      return '$' + typicalMatch[1];
+    }
+    const listMatch = textContent.match(/List\s*Price:\s*\$(\d+\.\d{2})/i);
+    if (listMatch) {
+      return '$' + listMatch[1];
+    }
+
+    // PRIORITY 3: Fall back to current price if no typical/list price found
     const selectors = [
       // Modern Amazon price selectors (2024-2025) - in priority order
       '.a-price[data-a-size="xl"]',
       '.a-price[data-a-size="large"]',
-      '.a-price.a-text-price',
       '.a-price'
     ];
 
@@ -844,7 +909,7 @@ class AmazonScraper {
         const offscreenPrice = container.querySelector('.a-offscreen');
         if (offscreenPrice && offscreenPrice.textContent.trim()) {
           const priceText = offscreenPrice.textContent.trim();
-          if (priceText.includes('$') || /\d/.test(priceText)) {
+          if ((priceText.includes('$') || /\d/.test(priceText)) && !this.isUnitPriceText(priceText, offscreenPrice)) {
             return priceText;
           }
         }
@@ -853,7 +918,7 @@ class AmazonScraper {
         const wholePrice = container.querySelector('.a-price-whole');
         if (wholePrice && wholePrice.textContent.trim()) {
           const priceText = wholePrice.textContent.trim();
-          if (/\d/.test(priceText)) {
+          if (/\d/.test(priceText) && !this.isUnitPriceText('$' + priceText, wholePrice)) {
             return '$' + priceText;
           }
         }
@@ -1131,11 +1196,47 @@ class AmazonScraper {
   }
 
   getPrice() {
+    // PRIORITY 1: Try to get "Typical Price" or "List Price" (for eBay reselling)
+    const typicalPriceSelectors = [
+      // Typical price selectors
+      'span.a-price[data-a-color="secondary"] .a-offscreen',
+      '.a-price.a-text-price .a-offscreen',
+      'span:contains("Typical price") + .a-price .a-offscreen',
+      'span:contains("List Price") + .a-price .a-offscreen',
+      // Look for strikethrough prices (usually the original price)
+      '.a-text-price .a-offscreen'
+    ];
+
+    for (const selector of typicalPriceSelectors) {
+      const elements = document.querySelectorAll(selector);
+      for (const element of elements) {
+        const priceText = element.textContent.trim();
+        // Make sure it's a valid price and not a unit price
+        if (priceText.includes('$') && /\$\d+\.\d{2}/.test(priceText)) {
+          // Check more thoroughly for unit pricing indicators
+          if (!this.isUnitPriceText(priceText, element)) {
+            return priceText;
+          }
+        }
+      }
+    }
+
+    // PRIORITY 2: Check for explicit "Typical:" or "List:" labels in page text
+    const pageText = document.body.textContent;
+    const typicalMatch = pageText.match(/Typical\s*price:\s*\$(\d+\.\d{2})/i);
+    if (typicalMatch) {
+      return '$' + typicalMatch[1];
+    }
+    const listMatch = pageText.match(/List\s*Price:\s*\$(\d+\.\d{2})/i);
+    if (listMatch) {
+      return '$' + listMatch[1];
+    }
+
+    // PRIORITY 3: Fall back to current price if no typical/list price found
     const selectors = [
       // Modern Amazon price selectors (2024-2025) - in priority order
       '.a-price[data-a-size="xl"]',
       '.a-price[data-a-size="large"]',
-      '.a-price.a-text-price',
       '.a-price'
     ];
 
@@ -1153,7 +1254,7 @@ class AmazonScraper {
         const offscreenPrice = container.querySelector('.a-offscreen');
         if (offscreenPrice && offscreenPrice.textContent.trim()) {
           const priceText = offscreenPrice.textContent.trim();
-          if (priceText.includes('$') || /\d/.test(priceText)) {
+          if ((priceText.includes('$') || /\d/.test(priceText)) && !this.isUnitPriceText(priceText, offscreenPrice)) {
             return priceText;
           }
         }
@@ -1162,7 +1263,7 @@ class AmazonScraper {
         const wholePrice = container.querySelector('.a-price-whole');
         if (wholePrice && wholePrice.textContent.trim()) {
           const priceText = wholePrice.textContent.trim();
-          if (/\d/.test(priceText)) {
+          if (/\d/.test(priceText) && !this.isUnitPriceText('$' + priceText, wholePrice)) {
             return '$' + priceText;
           }
         }
@@ -1186,6 +1287,46 @@ class AmazonScraper {
     return null;
   }
 
+  isUnitPriceText(priceText, element) {
+    // Check if the price text itself or surrounding context indicates it's a unit price
+
+    // Check the price text directly
+    const unitPricePatterns = [
+      /\$[\d.,]+\s*(per|\/)\s*(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)/i,
+      /\(\$[\d.,]+\s*\/\s*(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)\)/i
+    ];
+
+    if (unitPricePatterns.some(pattern => pattern.test(priceText))) {
+      return true;
+    }
+
+    // Check surrounding context (parent and nearby text)
+    if (element) {
+      const parent = element.parentElement;
+      const grandparent = parent?.parentElement;
+
+      // Check up to 3 levels of parent elements
+      const contextTexts = [
+        element.textContent || '',
+        parent?.textContent || '',
+        grandparent?.textContent || '',
+        grandparent?.parentElement?.textContent || ''
+      ];
+
+      for (const context of contextTexts) {
+        // Look for "per ounce", "per count", etc. in the surrounding text
+        if (/per\s+(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)/i.test(context)) {
+          // Make sure the price we found is actually associated with this unit pricing
+          if (context.includes(priceText)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
   isUnitPriceContainer(priceContainer) {
     // Check the container and its parent for unit price indicators
     const containerText = priceContainer.textContent || '';
@@ -1201,6 +1342,41 @@ class AmazonScraper {
     // Check if container or parent contains unit price text
     const textToCheck = containerText + ' ' + parentText;
     return unitPatterns.some(pattern => pattern.test(textToCheck));
+  }
+
+  checkPrimeEligibilityFromElement(element) {
+    // Check for Prime badge/logo within a product listing element
+    if (!element) return false;
+
+    const primeSelectors = [
+      'i.a-icon-prime',
+      '.a-icon-prime',
+      '[aria-label*="Prime"]',
+      '.s-prime',
+      'i[aria-label*="Prime"]',
+      'span.a-icon-prime-logo'
+    ];
+
+    for (const selector of primeSelectors) {
+      const primeElement = element.querySelector(selector);
+      if (primeElement) {
+        const text = primeElement.textContent || primeElement.getAttribute('aria-label') || '';
+        if (text.match(/prime/i) || primeElement.className.includes('prime')) {
+          return true;
+        }
+      }
+    }
+
+    // Check for "FREE delivery" or "FREE Shipping" text which often indicates Prime
+    const deliveryText = element.textContent || '';
+    if (deliveryText.match(/FREE.*delivery/i) || deliveryText.match(/FREE.*shipping/i)) {
+      // Additional check: make sure it's not just "FREE returns"
+      if (!deliveryText.match(/FREE.*returns/i) || deliveryText.match(/Prime/i)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   isPrimeEligible() {
