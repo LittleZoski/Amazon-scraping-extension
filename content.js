@@ -851,87 +851,75 @@ class AmazonScraper {
   }
 
   extractPriceFromDoc(doc) {
-    // PRIORITY 1: Try to get "Typical Price" or "List Price" (for eBay reselling)
-    const typicalPriceSelectors = [
-      // Typical price selectors
-      'span.a-price[data-a-color="secondary"] .a-offscreen',
-      '.a-price.a-text-price .a-offscreen',
-      'span:contains("Typical price") + .a-price .a-offscreen',
-      'span:contains("List Price") + .a-price .a-offscreen',
-      // Look for strikethrough prices (usually the original price)
-      '.a-text-price .a-offscreen'
-    ];
+    // CRITICAL: Only look for prices within the core price display container
+    // This prevents picking up incorrect prices from other parts of the page
+    // Use querySelector to get the FIRST occurrence (in case of duplicates)
+    const corePriceDisplay = doc.querySelector('#corePriceDisplay_desktop_feature_div');
 
-    for (const selector of typicalPriceSelectors) {
-      const elements = doc.querySelectorAll(selector);
-      for (const element of elements) {
-        const priceText = element.textContent.trim();
-        // Make sure it's a valid price and not a unit price
-        if (priceText.includes('$') && /\$\d+\.\d{2}/.test(priceText)) {
-          // Check more thoroughly for unit pricing indicators
-          if (!this.isUnitPriceText(priceText, element)) {
-            return priceText;
-          }
+    if (corePriceDisplay) {
+      // Strategy 0: Look for .aok-offscreen (Amazon's accessibility class for screen readers)
+      const aokOffscreen = corePriceDisplay.querySelector('.aok-offscreen');
+      if (aokOffscreen) {
+        const priceText = aokOffscreen.textContent.trim();
+        // Validate it's a proper price format
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 1: Look for .priceToPay with .a-price-whole (most reliable for current price)
+      const priceToPayWhole = corePriceDisplay.querySelector('.priceToPay .a-price-whole');
+      if (priceToPayWhole) {
+        const wholePart = priceToPayWhole.textContent.replace(/[^0-9]/g, '');
+        const fractionPart = corePriceDisplay.querySelector('.priceToPay .a-price-fraction');
+        if (wholePart) {
+          const fraction = fractionPart ? fractionPart.textContent.trim() : '00';
+          return `$${wholePart}.${fraction}`;
+        }
+      }
+
+      // Strategy 2: Look for .priceToPay .a-offscreen (current/deal price) within core display
+      const priceToPay = corePriceDisplay.querySelector('.priceToPay .a-offscreen');
+      if (priceToPay && priceToPay.textContent.trim()) {
+        const priceText = priceToPay.textContent.trim();
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 3: Look for .basisPrice (typical/list price) within core display
+      const basisPrice = corePriceDisplay.querySelector('.basisPrice .a-offscreen');
+      if (basisPrice && basisPrice.textContent.trim()) {
+        const priceText = basisPrice.textContent.trim();
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 4: Look for any .a-offscreen within core display that has a valid price
+      const offscreenPrices = corePriceDisplay.querySelectorAll('.a-offscreen');
+      for (const offscreen of offscreenPrices) {
+        const priceText = offscreen.textContent.trim();
+        // Match valid price format like $10.49 or $1,234.56
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 5: Build price from .a-price-whole and .a-price-fraction within core display
+      const priceWhole = corePriceDisplay.querySelector('.a-price-whole');
+      if (priceWhole) {
+        const wholePart = priceWhole.textContent.replace(/[^0-9]/g, '');
+        const fractionElement = priceWhole.parentElement?.querySelector('.a-price-fraction');
+        if (wholePart) {
+          const fraction = fractionElement ? fractionElement.textContent.trim() : '00';
+          return `$${wholePart}.${fraction}`;
         }
       }
     }
 
-    // PRIORITY 2: Check for explicit "Typical:" or "List:" labels
-    const textContent = doc.body.textContent;
-    const typicalMatch = textContent.match(/Typical\s*price:\s*\$(\d+\.\d{2})/i);
-    if (typicalMatch) {
-      return '$' + typicalMatch[1];
-    }
-    const listMatch = textContent.match(/List\s*Price:\s*\$(\d+\.\d{2})/i);
-    if (listMatch) {
-      return '$' + listMatch[1];
-    }
-
-    // PRIORITY 3: Fall back to current price if no typical/list price found
-    const selectors = [
-      // Modern Amazon price selectors (2024-2025) - in priority order
-      '.a-price[data-a-size="xl"]',
-      '.a-price[data-a-size="large"]',
-      '.a-price'
-    ];
-
-    // First, try to find price containers and check if they contain unit pricing
-    for (const selector of selectors) {
-      const priceContainers = doc.querySelectorAll(selector);
-
-      for (const container of priceContainers) {
-        // Skip if this is a unit price container
-        if (this.isUnitPriceContainerFromDoc(container)) {
-          continue;
-        }
-
-        // Get the actual price from .a-offscreen within this container
-        const offscreenPrice = container.querySelector('.a-offscreen');
-        if (offscreenPrice && offscreenPrice.textContent.trim()) {
-          const priceText = offscreenPrice.textContent.trim();
-          if ((priceText.includes('$') || /\d/.test(priceText)) && !this.isUnitPriceText(priceText, offscreenPrice)) {
-            return priceText;
-          }
-        }
-
-        // Fallback to .a-price-whole
-        const wholePrice = container.querySelector('.a-price-whole');
-        if (wholePrice && wholePrice.textContent.trim()) {
-          const priceText = wholePrice.textContent.trim();
-          if (/\d/.test(priceText) && !this.isUnitPriceText('$' + priceText, wholePrice)) {
-            return '$' + priceText;
-          }
-        }
-      }
-    }
-
-    // Legacy fallback selectors
-    const legacySelectors = [
-      '#priceblock_ourprice',
-      '#priceblock_dealprice',
-      '#price_inside_buybox'
-    ];
-
+    // Fallback: Legacy selectors (only if core price display not found)
+    const legacySelectors = ['#priceblock_ourprice', '#priceblock_dealprice', '#price_inside_buybox'];
     for (const selector of legacySelectors) {
       const element = doc.querySelector(selector);
       if (element && element.textContent.trim()) {
@@ -1196,87 +1184,75 @@ class AmazonScraper {
   }
 
   getPrice() {
-    // PRIORITY 1: Try to get "Typical Price" or "List Price" (for eBay reselling)
-    const typicalPriceSelectors = [
-      // Typical price selectors
-      'span.a-price[data-a-color="secondary"] .a-offscreen',
-      '.a-price.a-text-price .a-offscreen',
-      'span:contains("Typical price") + .a-price .a-offscreen',
-      'span:contains("List Price") + .a-price .a-offscreen',
-      // Look for strikethrough prices (usually the original price)
-      '.a-text-price .a-offscreen'
-    ];
+    // CRITICAL: Only look for prices within the core price display container
+    // This prevents picking up incorrect prices from other parts of the page
+    // Use querySelector to get the FIRST occurrence (in case of duplicates)
+    const corePriceDisplay = document.querySelector('#corePriceDisplay_desktop_feature_div');
 
-    for (const selector of typicalPriceSelectors) {
-      const elements = document.querySelectorAll(selector);
-      for (const element of elements) {
-        const priceText = element.textContent.trim();
-        // Make sure it's a valid price and not a unit price
-        if (priceText.includes('$') && /\$\d+\.\d{2}/.test(priceText)) {
-          // Check more thoroughly for unit pricing indicators
-          if (!this.isUnitPriceText(priceText, element)) {
-            return priceText;
-          }
+    if (corePriceDisplay) {
+      // Strategy 0: Look for .aok-offscreen (Amazon's accessibility class for screen readers)
+      const aokOffscreen = corePriceDisplay.querySelector('.aok-offscreen');
+      if (aokOffscreen) {
+        const priceText = aokOffscreen.textContent.trim();
+        // Validate it's a proper price format
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 1: Look for .priceToPay with .a-price-whole (most reliable for current price)
+      const priceToPayWhole = corePriceDisplay.querySelector('.priceToPay .a-price-whole');
+      if (priceToPayWhole) {
+        const wholePart = priceToPayWhole.textContent.replace(/[^0-9]/g, '');
+        const fractionPart = corePriceDisplay.querySelector('.priceToPay .a-price-fraction');
+        if (wholePart) {
+          const fraction = fractionPart ? fractionPart.textContent.trim() : '00';
+          return `$${wholePart}.${fraction}`;
+        }
+      }
+
+      // Strategy 2: Look for .priceToPay .a-offscreen (current/deal price) within core display
+      const priceToPay = corePriceDisplay.querySelector('.priceToPay .a-offscreen');
+      if (priceToPay && priceToPay.textContent.trim()) {
+        const priceText = priceToPay.textContent.trim();
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 3: Look for .basisPrice (typical/list price) within core display
+      const basisPrice = corePriceDisplay.querySelector('.basisPrice .a-offscreen');
+      if (basisPrice && basisPrice.textContent.trim()) {
+        const priceText = basisPrice.textContent.trim();
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 4: Look for any .a-offscreen within core display that has a valid price
+      const offscreenPrices = corePriceDisplay.querySelectorAll('.a-offscreen');
+      for (const offscreen of offscreenPrices) {
+        const priceText = offscreen.textContent.trim();
+        // Match valid price format like $10.49 or $1,234.56
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 5: Build price from .a-price-whole and .a-price-fraction within core display
+      const priceWhole = corePriceDisplay.querySelector('.a-price-whole');
+      if (priceWhole) {
+        const wholePart = priceWhole.textContent.replace(/[^0-9]/g, '');
+        const fractionElement = priceWhole.parentElement?.querySelector('.a-price-fraction');
+        if (wholePart) {
+          const fraction = fractionElement ? fractionElement.textContent.trim() : '00';
+          return `$${wholePart}.${fraction}`;
         }
       }
     }
 
-    // PRIORITY 2: Check for explicit "Typical:" or "List:" labels in page text
-    const pageText = document.body.textContent;
-    const typicalMatch = pageText.match(/Typical\s*price:\s*\$(\d+\.\d{2})/i);
-    if (typicalMatch) {
-      return '$' + typicalMatch[1];
-    }
-    const listMatch = pageText.match(/List\s*Price:\s*\$(\d+\.\d{2})/i);
-    if (listMatch) {
-      return '$' + listMatch[1];
-    }
-
-    // PRIORITY 3: Fall back to current price if no typical/list price found
-    const selectors = [
-      // Modern Amazon price selectors (2024-2025) - in priority order
-      '.a-price[data-a-size="xl"]',
-      '.a-price[data-a-size="large"]',
-      '.a-price'
-    ];
-
-    // First, try to find price containers and check if they contain unit pricing
-    for (const selector of selectors) {
-      const priceContainers = document.querySelectorAll(selector);
-
-      for (const container of priceContainers) {
-        // Skip if this is a unit price container
-        if (this.isUnitPriceContainer(container)) {
-          continue;
-        }
-
-        // Get the actual price from .a-offscreen within this container
-        const offscreenPrice = container.querySelector('.a-offscreen');
-        if (offscreenPrice && offscreenPrice.textContent.trim()) {
-          const priceText = offscreenPrice.textContent.trim();
-          if ((priceText.includes('$') || /\d/.test(priceText)) && !this.isUnitPriceText(priceText, offscreenPrice)) {
-            return priceText;
-          }
-        }
-
-        // Fallback to .a-price-whole
-        const wholePrice = container.querySelector('.a-price-whole');
-        if (wholePrice && wholePrice.textContent.trim()) {
-          const priceText = wholePrice.textContent.trim();
-          if (/\d/.test(priceText) && !this.isUnitPriceText('$' + priceText, wholePrice)) {
-            return '$' + priceText;
-          }
-        }
-      }
-    }
-
-    // Legacy fallback selectors
-    const legacySelectors = [
-      '#priceblock_ourprice',
-      '#priceblock_dealprice',
-      '#price_inside_buybox'
-    ];
-
+    // Fallback: Legacy selectors (only if core price display not found)
+    const legacySelectors = ['#priceblock_ourprice', '#priceblock_dealprice', '#price_inside_buybox'];
     for (const selector of legacySelectors) {
       const element = document.querySelector(selector);
       if (element && element.textContent.trim()) {
