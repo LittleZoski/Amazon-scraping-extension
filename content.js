@@ -138,6 +138,8 @@ class AmazonScraper {
     const url = window.location.href;
     return url.includes('/s?') ||
            url.includes('/s/') ||
+           url.includes('/b/') ||
+           url.includes('node=') ||
            url.includes('/gp/bestsellers') ||
            url.includes('/zgbs/') ||
            url.includes('/Best-Sellers') ||
