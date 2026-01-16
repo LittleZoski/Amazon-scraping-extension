@@ -19,7 +19,8 @@ export class DataExtractor {
       bulletPoints: this.getBulletPoints(),
       specifications: this.getSpecifications(),
       url: window.location.href,
-      scrapedAt: new Date().toISOString()
+      scrapedAt: new Date().toISOString(),
+      source: 'amazon' // Add source field
     };
   }
 

@@ -95,9 +95,16 @@ export class AddressImporter {
             style="width: 100%; padding: 10px; border: 2px dashed #d1d5db; border-radius: 8px; cursor: pointer; font-size: 13px;">
         </div>
 
-        <div id="address-preview" style="display: none; margin-bottom: 20px; max-height: 200px; overflow-y: auto; background: #f9fafb; padding: 15px; border-radius: 8px;">
-          <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #666;">Addresses to Import:</h3>
-          <div id="address-list" style="font-size: 12px; color: #333;"></div>
+        <div id="address-preview" style="display: none; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h3 style="margin: 0; font-size: 14px; color: #666;">Addresses to Import:</h3>
+            <div style="display: flex; gap: 10px;">
+              <button id="select-all-btn" style="padding: 4px 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500;">Select All</button>
+              <button id="deselect-all-btn" style="padding: 4px 10px; background: #6b7280; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500;">Deselect All</button>
+            </div>
+          </div>
+          <div id="address-list" style="font-size: 12px; color: #333; max-height: 250px; overflow-y: auto; background: #f9fafb; padding: 15px; border-radius: 8px;"></div>
+          <div id="selection-count" style="margin-top: 10px; font-size: 12px; color: #666; font-weight: 500;"></div>
         </div>
 
         <div style="display: flex; gap: 10px; margin-top: 25px;">
@@ -118,8 +125,30 @@ export class AddressImporter {
     const cancelBtn = modal.querySelector('#cancel-import-btn');
     const addressPreview = modal.querySelector('#address-preview');
     const addressList = modal.querySelector('#address-list');
+    const selectAllBtn = modal.querySelector('#select-all-btn');
+    const deselectAllBtn = modal.querySelector('#deselect-all-btn');
+    const selectionCount = modal.querySelector('#selection-count');
 
     let ordersData = null;
+    let addresses = [];
+
+    const updateSelectionCount = () => {
+      const checkedCount = addressList.querySelectorAll('input[type="checkbox"]:checked').length;
+      selectionCount.textContent = `${checkedCount} of ${addresses.length} addresses selected`;
+
+      // Enable/disable start button based on selection
+      if (checkedCount > 0) {
+        startBtn.disabled = false;
+        startBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+        startBtn.style.color = 'white';
+        startBtn.style.cursor = 'pointer';
+      } else {
+        startBtn.disabled = true;
+        startBtn.style.background = '#d1d5db';
+        startBtn.style.color = '#6b7280';
+        startBtn.style.cursor = 'not-allowed';
+      }
+    };
 
     fileInput.addEventListener('change', async (e) => {
       const file = e.target.files[0];
@@ -129,7 +158,7 @@ export class AddressImporter {
         const text = await file.text();
         ordersData = JSON.parse(text);
 
-        const addresses = this.extractAddressesFromOrders(ordersData);
+        addresses = this.extractAddressesFromOrders(ordersData);
 
         if (addresses.length === 0) {
           alert('No addresses found in the file.');
@@ -138,15 +167,24 @@ export class AddressImporter {
 
         addressPreview.style.display = 'block';
         addressList.innerHTML = addresses.map((addr, i) => `
-          <div style="padding: 8px; margin-bottom: 5px; background: white; border-radius: 4px;">
-            ${i + 1}. ${addr.name} - ${addr.city}, ${addr.stateOrProvince} ${addr.postalCode}
-          </div>
+          <label style="display: flex; align-items: center; padding: 8px; margin-bottom: 5px; background: white; border-radius: 4px; cursor: pointer; transition: background 0.2s;"
+                 onmouseover="this.style.background='#f0f9ff'"
+                 onmouseout="this.style.background='white'">
+            <input type="checkbox" class="address-checkbox" data-index="${i}" checked
+                   style="margin-right: 10px; width: 16px; height: 16px; cursor: pointer;">
+            <span style="flex: 1;">
+              <strong>${i + 1}. ${addr.name}</strong><br>
+              <span style="color: #666; font-size: 11px;">${addr.addressLine1 || ''}, ${addr.city}, ${addr.stateOrProvince} ${addr.postalCode}</span>
+            </span>
+          </label>
         `).join('');
 
-        startBtn.disabled = false;
-        startBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
-        startBtn.style.color = 'white';
-        startBtn.style.cursor = 'pointer';
+        // Add event listeners to checkboxes
+        addressList.querySelectorAll('.address-checkbox').forEach(checkbox => {
+          checkbox.addEventListener('change', updateSelectionCount);
+        });
+
+        updateSelectionCount();
 
       } catch (error) {
         alert('Error reading file: ' + error.message);
@@ -154,10 +192,36 @@ export class AddressImporter {
       }
     });
 
+    selectAllBtn.addEventListener('click', () => {
+      addressList.querySelectorAll('.address-checkbox').forEach(checkbox => {
+        checkbox.checked = true;
+      });
+      updateSelectionCount();
+    });
+
+    deselectAllBtn.addEventListener('click', () => {
+      addressList.querySelectorAll('.address-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+      });
+      updateSelectionCount();
+    });
+
     startBtn.addEventListener('click', () => {
       if (!ordersData) return;
+
+      // Get only selected addresses
+      const selectedIndices = Array.from(addressList.querySelectorAll('.address-checkbox:checked'))
+        .map(checkbox => parseInt(checkbox.dataset.index));
+
+      if (selectedIndices.length === 0) {
+        alert('Please select at least one address to import.');
+        return;
+      }
+
+      const selectedAddresses = selectedIndices.map(i => addresses[i]);
+
       modal.remove();
-      this.startAddressImport(ordersData);
+      this.startAddressImport(ordersData, selectedAddresses);
     });
 
     cancelBtn.addEventListener('click', () => modal.remove());
@@ -189,8 +253,8 @@ export class AddressImporter {
     return addresses;
   }
 
-  async startAddressImport(ordersData) {
-    const addresses = this.extractAddressesFromOrders(ordersData);
+  async startAddressImport(ordersData, selectedAddresses = null) {
+    const addresses = selectedAddresses || this.extractAddressesFromOrders(ordersData);
 
     if (addresses.length === 0) {
       UIManager.showNotification('No addresses to import', 'error');

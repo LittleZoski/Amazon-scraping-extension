@@ -541,7 +541,8 @@ class DataExtractor {
       bulletPoints: this.getBulletPoints(),
       specifications: this.getSpecifications(),
       url: window.location.href,
-      scrapedAt: new Date().toISOString()
+      scrapedAt: new Date().toISOString(),
+      source: 'amazon' // Add source field
     };
   }
 
@@ -555,62 +556,74 @@ class DataExtractor {
   }
 
   static getPrice() {
-    const typicalPriceSelectors = [
-      'span.a-price[data-a-color="secondary"] .a-offscreen',
-      '.a-price.a-text-price .a-offscreen',
-      'span:contains("Typical price") + .a-price .a-offscreen',
-      'span:contains("List Price") + .a-price .a-offscreen',
-      '.a-text-price .a-offscreen'
-    ];
+    // CRITICAL: Only look for prices within the core price display container
+    // This prevents picking up incorrect prices from other parts of the page
+    // Use querySelector to get the FIRST occurrence (in case of duplicates)
+    const corePriceDisplay = document.querySelector('#corePriceDisplay_desktop_feature_div');
 
-    for (const selector of typicalPriceSelectors) {
-      const elements = document.querySelectorAll(selector);
-      for (const element of elements) {
-        const priceText = element.textContent.trim();
-        if (priceText.includes('$') && /\$\d+\.\d{2}/.test(priceText)) {
-          if (!this.isUnitPriceText(priceText, element)) {
-            return priceText;
-          }
+    if (corePriceDisplay) {
+      // Strategy 0: Look for .aok-offscreen (Amazon's accessibility class for screen readers)
+      const aokOffscreen = corePriceDisplay.querySelector('.aok-offscreen');
+      if (aokOffscreen) {
+        const priceText = aokOffscreen.textContent.trim();
+        // Validate it's a proper price format
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 1: Look for .priceToPay with .a-price-whole (most reliable for current price)
+      const priceToPayWhole = corePriceDisplay.querySelector('.priceToPay .a-price-whole');
+      if (priceToPayWhole) {
+        const wholePart = priceToPayWhole.textContent.replace(/[^0-9]/g, '');
+        const fractionPart = corePriceDisplay.querySelector('.priceToPay .a-price-fraction');
+        if (wholePart) {
+          const fraction = fractionPart ? fractionPart.textContent.trim() : '00';
+          return `$${wholePart}.${fraction}`;
+        }
+      }
+
+      // Strategy 2: Look for .priceToPay .a-offscreen (current/deal price) within core display
+      const priceToPay = corePriceDisplay.querySelector('.priceToPay .a-offscreen');
+      if (priceToPay && priceToPay.textContent.trim()) {
+        const priceText = priceToPay.textContent.trim();
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 3: Look for .basisPrice (typical/list price) within core display
+      const basisPrice = corePriceDisplay.querySelector('.basisPrice .a-offscreen');
+      if (basisPrice && basisPrice.textContent.trim()) {
+        const priceText = basisPrice.textContent.trim();
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 4: Look for any .a-offscreen within core display that has a valid price
+      const offscreenPrices = corePriceDisplay.querySelectorAll('.a-offscreen');
+      for (const offscreen of offscreenPrices) {
+        const priceText = offscreen.textContent.trim();
+        // Match valid price format like $10.49 or $1,234.56
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 5: Build price from .a-price-whole and .a-price-fraction within core display
+      const priceWhole = corePriceDisplay.querySelector('.a-price-whole');
+      if (priceWhole) {
+        const wholePart = priceWhole.textContent.replace(/[^0-9]/g, '');
+        const fractionElement = priceWhole.parentElement?.querySelector('.a-price-fraction');
+        if (wholePart) {
+          const fraction = fractionElement ? fractionElement.textContent.trim() : '00';
+          return `$${wholePart}.${fraction}`;
         }
       }
     }
 
-    const pageText = document.body.textContent;
-    const typicalMatch = pageText.match(/Typical\s*price:\s*\$(\d+\.\d{2})/i);
-    if (typicalMatch) return '$' + typicalMatch[1];
-
-    const listMatch = pageText.match(/List\s*Price:\s*\$(\d+\.\d{2})/i);
-    if (listMatch) return '$' + listMatch[1];
-
-    const selectors = [
-      '.a-price[data-a-size="xl"]',
-      '.a-price[data-a-size="large"]',
-      '.a-price'
-    ];
-
-    for (const selector of selectors) {
-      const priceContainers = document.querySelectorAll(selector);
-      for (const container of priceContainers) {
-        if (this.isUnitPriceContainer(container)) continue;
-
-        const offscreenPrice = container.querySelector('.a-offscreen');
-        if (offscreenPrice && offscreenPrice.textContent.trim()) {
-          const priceText = offscreenPrice.textContent.trim();
-          if ((priceText.includes('$') || /\d/.test(priceText)) && !this.isUnitPriceText(priceText, offscreenPrice)) {
-            return priceText;
-          }
-        }
-
-        const wholePrice = container.querySelector('.a-price-whole');
-        if (wholePrice && wholePrice.textContent.trim()) {
-          const priceText = wholePrice.textContent.trim();
-          if (/\d/.test(priceText) && !this.isUnitPriceText('$' + priceText, wholePrice)) {
-            return '$' + priceText;
-          }
-        }
-      }
-    }
-
+    // Fallback: Legacy selectors (only if core price display not found)
     const legacySelectors = ['#priceblock_ourprice', '#priceblock_dealprice', '#price_inside_buybox'];
     for (const selector of legacySelectors) {
       const element = document.querySelector(selector);
@@ -667,6 +680,19 @@ class DataExtractor {
   }
 
   static isPrimeEligible() {
+    // Check within a-box-inner containers near pricing first
+    const boxInnerElements = document.querySelectorAll('.a-box-inner');
+    for (const box of boxInnerElements) {
+      const boxText = box.textContent || '';
+      if (boxText.match(/prime/i)) {
+        // Verify it's near price information
+        const hasPriceInfo = boxText.match(/\$[\d,]+\.?\d*/);
+        if (hasPriceInfo) {
+          return true;
+        }
+      }
+    }
+
     const primeSelectors = [
       '#priceBadging_feature_div [aria-label*="Prime"]',
       '.prime-logo',
@@ -864,62 +890,74 @@ class DataExtractor {
   }
 
   static extractPriceFromDoc(doc) {
-    const typicalPriceSelectors = [
-      'span.a-price[data-a-color="secondary"] .a-offscreen',
-      '.a-price.a-text-price .a-offscreen',
-      'span:contains("Typical price") + .a-price .a-offscreen',
-      'span:contains("List Price") + .a-price .a-offscreen',
-      '.a-text-price .a-offscreen'
-    ];
+    // CRITICAL: Only look for prices within the core price display container
+    // This prevents picking up incorrect prices from other parts of the page
+    // Use querySelector to get the FIRST occurrence (in case of duplicates)
+    const corePriceDisplay = doc.querySelector('#corePriceDisplay_desktop_feature_div');
 
-    for (const selector of typicalPriceSelectors) {
-      const elements = doc.querySelectorAll(selector);
-      for (const element of elements) {
-        const priceText = element.textContent.trim();
-        if (priceText.includes('$') && /\$\d+\.\d{2}/.test(priceText)) {
-          if (!this.isUnitPriceText(priceText, element)) {
-            return priceText;
-          }
+    if (corePriceDisplay) {
+      // Strategy 0: Look for .aok-offscreen (Amazon's accessibility class for screen readers)
+      const aokOffscreen = corePriceDisplay.querySelector('.aok-offscreen');
+      if (aokOffscreen) {
+        const priceText = aokOffscreen.textContent.trim();
+        // Validate it's a proper price format
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 1: Look for .priceToPay with .a-price-whole (most reliable for current price)
+      const priceToPayWhole = corePriceDisplay.querySelector('.priceToPay .a-price-whole');
+      if (priceToPayWhole) {
+        const wholePart = priceToPayWhole.textContent.replace(/[^0-9]/g, '');
+        const fractionPart = corePriceDisplay.querySelector('.priceToPay .a-price-fraction');
+        if (wholePart) {
+          const fraction = fractionPart ? fractionPart.textContent.trim() : '00';
+          return `$${wholePart}.${fraction}`;
+        }
+      }
+
+      // Strategy 2: Look for .priceToPay .a-offscreen (current/deal price) within core display
+      const priceToPay = corePriceDisplay.querySelector('.priceToPay .a-offscreen');
+      if (priceToPay && priceToPay.textContent.trim()) {
+        const priceText = priceToPay.textContent.trim();
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 3: Look for .basisPrice (typical/list price) within core display
+      const basisPrice = corePriceDisplay.querySelector('.basisPrice .a-offscreen');
+      if (basisPrice && basisPrice.textContent.trim()) {
+        const priceText = basisPrice.textContent.trim();
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 4: Look for any .a-offscreen within core display that has a valid price
+      const offscreenPrices = corePriceDisplay.querySelectorAll('.a-offscreen');
+      for (const offscreen of offscreenPrices) {
+        const priceText = offscreen.textContent.trim();
+        // Match valid price format like $10.49 or $1,234.56
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 5: Build price from .a-price-whole and .a-price-fraction within core display
+      const priceWhole = corePriceDisplay.querySelector('.a-price-whole');
+      if (priceWhole) {
+        const wholePart = priceWhole.textContent.replace(/[^0-9]/g, '');
+        const fractionElement = priceWhole.parentElement?.querySelector('.a-price-fraction');
+        if (wholePart) {
+          const fraction = fractionElement ? fractionElement.textContent.trim() : '00';
+          return `$${wholePart}.${fraction}`;
         }
       }
     }
 
-    const textContent = doc.body.textContent;
-    const typicalMatch = textContent.match(/Typical\s*price:\s*\$(\d+\.\d{2})/i);
-    if (typicalMatch) return '$' + typicalMatch[1];
-
-    const listMatch = textContent.match(/List\s*Price:\s*\$(\d+\.\d{2})/i);
-    if (listMatch) return '$' + listMatch[1];
-
-    const selectors = [
-      '.a-price[data-a-size="xl"]',
-      '.a-price[data-a-size="large"]',
-      '.a-price'
-    ];
-
-    for (const selector of selectors) {
-      const priceContainers = doc.querySelectorAll(selector);
-      for (const container of priceContainers) {
-        if (this.isUnitPriceContainerFromDoc(container)) continue;
-
-        const offscreenPrice = container.querySelector('.a-offscreen');
-        if (offscreenPrice && offscreenPrice.textContent.trim()) {
-          const priceText = offscreenPrice.textContent.trim();
-          if ((priceText.includes('$') || /\d/.test(priceText)) && !this.isUnitPriceText(priceText, offscreenPrice)) {
-            return priceText;
-          }
-        }
-
-        const wholePrice = container.querySelector('.a-price-whole');
-        if (wholePrice && wholePrice.textContent.trim()) {
-          const priceText = wholePrice.textContent.trim();
-          if (/\d/.test(priceText) && !this.isUnitPriceText('$' + priceText, wholePrice)) {
-            return '$' + priceText;
-          }
-        }
-      }
-    }
-
+    // Fallback: Legacy selectors (only if core price display not found)
     const legacySelectors = ['#priceblock_ourprice', '#priceblock_dealprice', '#price_inside_buybox'];
     for (const selector of legacySelectors) {
       const element = doc.querySelector(selector);
@@ -985,6 +1023,19 @@ class DataExtractor {
   }
 
   static extractPrimeEligibilityFromDoc(doc) {
+    // Check within a-box-inner containers near pricing first
+    const boxInnerElements = doc.querySelectorAll('.a-box-inner');
+    for (const box of boxInnerElements) {
+      const boxText = box.textContent || '';
+      if (boxText.match(/prime/i)) {
+        // Verify it's near price information
+        const hasPriceInfo = boxText.match(/\$[\d,]+\.?\d*/);
+        if (hasPriceInfo) {
+          return true;
+        }
+      }
+    }
+
     const primeSelectors = [
       '#priceBadging_feature_div [aria-label*="Prime"]',
       '.prime-logo',
@@ -1643,7 +1694,8 @@ class BulkScraper {
         images: DataExtractor.extractImagesFromDoc(doc),
         description: DataExtractor.extractDescriptionFromDoc(doc),
         bulletPoints: DataExtractor.extractBulletPointsFromDoc(doc),
-        specifications: DataExtractor.extractSpecificationsFromDoc(doc)
+        specifications: DataExtractor.extractSpecificationsFromDoc(doc),
+        source: 'amazon' // Add source field
       };
 
       return productData;
@@ -1661,7 +1713,8 @@ class BulkScraper {
         images: [],
         description: `Error loading details: ${error.message}`,
         bulletPoints: [],
-        specifications: {}
+        specifications: {},
+        source: 'amazon' // Add source field
       };
     }
   }
@@ -1769,9 +1822,16 @@ class AddressImporter {
             style="width: 100%; padding: 10px; border: 2px dashed #d1d5db; border-radius: 8px; cursor: pointer; font-size: 13px;">
         </div>
 
-        <div id="address-preview" style="display: none; margin-bottom: 20px; max-height: 200px; overflow-y: auto; background: #f9fafb; padding: 15px; border-radius: 8px;">
-          <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #666;">Addresses to Import:</h3>
-          <div id="address-list" style="font-size: 12px; color: #333;"></div>
+        <div id="address-preview" style="display: none; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h3 style="margin: 0; font-size: 14px; color: #666;">Addresses to Import:</h3>
+            <div style="display: flex; gap: 10px;">
+              <button id="select-all-btn" style="padding: 4px 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500;">Select All</button>
+              <button id="deselect-all-btn" style="padding: 4px 10px; background: #6b7280; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500;">Deselect All</button>
+            </div>
+          </div>
+          <div id="address-list" style="font-size: 12px; color: #333; max-height: 250px; overflow-y: auto; background: #f9fafb; padding: 15px; border-radius: 8px;"></div>
+          <div id="selection-count" style="margin-top: 10px; font-size: 12px; color: #666; font-weight: 500;"></div>
         </div>
 
         <div style="display: flex; gap: 10px; margin-top: 25px;">
@@ -1792,8 +1852,30 @@ class AddressImporter {
     const cancelBtn = modal.querySelector('#cancel-import-btn');
     const addressPreview = modal.querySelector('#address-preview');
     const addressList = modal.querySelector('#address-list');
+    const selectAllBtn = modal.querySelector('#select-all-btn');
+    const deselectAllBtn = modal.querySelector('#deselect-all-btn');
+    const selectionCount = modal.querySelector('#selection-count');
 
     let ordersData = null;
+    let addresses = [];
+
+    const updateSelectionCount = () => {
+      const checkedCount = addressList.querySelectorAll('input[type="checkbox"]:checked').length;
+      selectionCount.textContent = `${checkedCount} of ${addresses.length} addresses selected`;
+
+      // Enable/disable start button based on selection
+      if (checkedCount > 0) {
+        startBtn.disabled = false;
+        startBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+        startBtn.style.color = 'white';
+        startBtn.style.cursor = 'pointer';
+      } else {
+        startBtn.disabled = true;
+        startBtn.style.background = '#d1d5db';
+        startBtn.style.color = '#6b7280';
+        startBtn.style.cursor = 'not-allowed';
+      }
+    };
 
     fileInput.addEventListener('change', async (e) => {
       const file = e.target.files[0];
@@ -1803,7 +1885,7 @@ class AddressImporter {
         const text = await file.text();
         ordersData = JSON.parse(text);
 
-        const addresses = this.extractAddressesFromOrders(ordersData);
+        addresses = this.extractAddressesFromOrders(ordersData);
 
         if (addresses.length === 0) {
           alert('No addresses found in the file.');
@@ -1812,15 +1894,24 @@ class AddressImporter {
 
         addressPreview.style.display = 'block';
         addressList.innerHTML = addresses.map((addr, i) => `
-          <div style="padding: 8px; margin-bottom: 5px; background: white; border-radius: 4px;">
-            ${i + 1}. ${addr.name} - ${addr.city}, ${addr.stateOrProvince} ${addr.postalCode}
-          </div>
+          <label style="display: flex; align-items: center; padding: 8px; margin-bottom: 5px; background: white; border-radius: 4px; cursor: pointer; transition: background 0.2s;"
+                 onmouseover="this.style.background='#f0f9ff'"
+                 onmouseout="this.style.background='white'">
+            <input type="checkbox" class="address-checkbox" data-index="${i}" checked
+                   style="margin-right: 10px; width: 16px; height: 16px; cursor: pointer;">
+            <span style="flex: 1;">
+              <strong>${i + 1}. ${addr.name}</strong><br>
+              <span style="color: #666; font-size: 11px;">${addr.addressLine1 || ''}, ${addr.city}, ${addr.stateOrProvince} ${addr.postalCode}</span>
+            </span>
+          </label>
         `).join('');
 
-        startBtn.disabled = false;
-        startBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
-        startBtn.style.color = 'white';
-        startBtn.style.cursor = 'pointer';
+        // Add event listeners to checkboxes
+        addressList.querySelectorAll('.address-checkbox').forEach(checkbox => {
+          checkbox.addEventListener('change', updateSelectionCount);
+        });
+
+        updateSelectionCount();
 
       } catch (error) {
         alert('Error reading file: ' + error.message);
@@ -1828,10 +1919,36 @@ class AddressImporter {
       }
     });
 
+    selectAllBtn.addEventListener('click', () => {
+      addressList.querySelectorAll('.address-checkbox').forEach(checkbox => {
+        checkbox.checked = true;
+      });
+      updateSelectionCount();
+    });
+
+    deselectAllBtn.addEventListener('click', () => {
+      addressList.querySelectorAll('.address-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+      });
+      updateSelectionCount();
+    });
+
     startBtn.addEventListener('click', () => {
       if (!ordersData) return;
+
+      // Get only selected addresses
+      const selectedIndices = Array.from(addressList.querySelectorAll('.address-checkbox:checked'))
+        .map(checkbox => parseInt(checkbox.dataset.index));
+
+      if (selectedIndices.length === 0) {
+        alert('Please select at least one address to import.');
+        return;
+      }
+
+      const selectedAddresses = selectedIndices.map(i => addresses[i]);
+
       modal.remove();
-      this.startAddressImport(ordersData);
+      this.startAddressImport(ordersData, selectedAddresses);
     });
 
     cancelBtn.addEventListener('click', () => modal.remove());
@@ -1863,8 +1980,8 @@ class AddressImporter {
     return addresses;
   }
 
-  async startAddressImport(ordersData) {
-    const addresses = this.extractAddressesFromOrders(ordersData);
+  async startAddressImport(ordersData, selectedAddresses = null) {
+    const addresses = selectedAddresses || this.extractAddressesFromOrders(ordersData);
 
     if (addresses.length === 0) {
       UIManager.showNotification('No addresses to import', 'error');

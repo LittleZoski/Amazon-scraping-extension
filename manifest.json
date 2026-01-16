@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Amazon Product Scraper",
-  "version": "1.0.0",
-  "description": "Extract Amazon product information for re-listing on eBay",
+  "name": "Amazon & Yami Product Scraper",
+  "version": "1.1.0",
+  "description": "Extract Amazon and Yami product information for re-listing on eBay",
   "permissions": [
     "activeTab",
     "downloads",
@@ -12,6 +12,8 @@
     "https://www.amazon.com/*",
     "https://www.amazon.co.uk/*",
     "https://www.amazon.ca/*",
+    "https://www.yami.com/*",
+    "https://www.yamibuy.com/*",
     "https://www.ebay.com/*",
     "https://www.ebay.co.uk/*",
     "https://www.ebay.ca/*"
@@ -41,6 +43,21 @@
         "https://www.ebay.ca/*"
       ],
       "js": ["ebay-content.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "https://www.yami.com/*",
+        "https://www.yamibuy.com/*"
+      ],
+      "js": [
+        "src/utils/YamiDOMHelpers.js",
+        "src/extractors/YamiDataExtractor.js",
+        "src/utils/YamiDataSanitizer.js",
+        "src/scrapers/YamiProductScraper.js",
+        "src/scrapers/YamiBulkScraper.js",
+        "yami-content.js"
+      ],
       "run_at": "document_end"
     }
   ],

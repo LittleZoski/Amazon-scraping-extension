@@ -1,0 +1,752 @@
+/**
+ * YamiDataExtractor - Data extraction logic for Yami.com
+ * MUST MATCH Amazon DataExtractor.js format exactly
+ * Extracts product data using multiple fallback strategies
+ */
+
+class YamiDataExtractor {
+  // ===== Current Page Extraction =====
+
+  /**
+   * Extract complete product data from current page
+   * MATCHES Amazon extractProductData() format EXACTLY
+   * @returns {Object} Product data object
+   */
+  static extractProductData() {
+    const productID = YamiDOMHelpers.extractProductID();
+
+    return {
+      asin: productID, // Use "asin" for eBay backend compatibility (same as Amazon)
+      title: this.getTitle(),
+      price: this.getPrice(),
+      deliveryFee: this.getDeliveryFee(),
+      isPrime: this.isFulfilledByYami(),
+      images: this.getImages(),
+      description: this.getDescription(),
+      bulletPoints: this.getBulletPoints(),
+      specifications: this.getSpecifications(),
+      url: window.location.href,
+      scrapedAt: new Date().toISOString()
+    };
+  }
+
+  /**
+   * Extract product title with multiple fallback strategies
+   * @returns {string} Product title
+   */
+  static getTitle() {
+    // Strategy 1: JSON-LD structured data
+    const jsonld = YamiDOMHelpers.extractJSONLD(document);
+    if (jsonld && jsonld.name) {
+      return jsonld.name;
+    }
+
+    // Strategy 2: H1 tag
+    const h1 = document.querySelector('h1');
+    if (h1) {
+      return h1.textContent.trim();
+    }
+
+    // Strategy 3: Meta tags
+    const ogTitle = document.querySelector('meta[property="og:title"]');
+    if (ogTitle) {
+      return ogTitle.getAttribute('content');
+    }
+
+    // Strategy 4: Title tag (less reliable)
+    const titleTag = document.querySelector('title');
+    if (titleTag) {
+      const title = titleTag.textContent.trim();
+      // Remove site suffix like " - Yami.com"
+      return title.replace(/\s*[-–|]\s*Yami\.com.*$/i, '').trim();
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract current price with multiple fallback strategies
+   * CRITICAL: Must get the CORRECT displayed price
+   * @returns {string} Formatted price (e.g., "$35.99")
+   */
+  static getPrice() {
+    // Strategy 1: JSON-LD offers price (most reliable - verified to have correct price 35.99)
+    const jsonld = YamiDOMHelpers.extractJSONLD(document);
+    if (jsonld && jsonld.offers && jsonld.offers.price) {
+      const price = parseFloat(jsonld.offers.price);
+      if (!isNaN(price)) {
+        return YamiDOMHelpers.formatPrice(price);
+      }
+    }
+
+    // Strategy 2: .price-shop.word-bold (verified correct selector from debug)
+    const priceShop = document.querySelector('.price-shop.word-bold');
+    if (priceShop) {
+      const priceText = priceShop.textContent.trim();
+      const price = YamiDOMHelpers.parsePrice(priceText);
+      if (price !== null && price > 0) {
+        return YamiDOMHelpers.formatPrice(price);
+      }
+    }
+
+    // Strategy 3: Other price selectors (fallback)
+    const priceSelectors = [
+      '.price-shop',
+      '.word-bold-price.red-price',
+      '[itemprop="price"]',
+      '.item-price__valid'
+    ];
+
+    for (const selector of priceSelectors) {
+      const priceElement = document.querySelector(selector);
+      if (priceElement) {
+        const priceText = priceElement.textContent.trim();
+        const price = YamiDOMHelpers.parsePrice(priceText);
+        if (price !== null && price > 0) {
+          return YamiDOMHelpers.formatPrice(price);
+        }
+      }
+    }
+
+    // Strategy 4: Meta tags
+    const ogPrice = document.querySelector('meta[property="product:price:amount"]');
+    if (ogPrice) {
+      const price = parseFloat(ogPrice.getAttribute('content'));
+      if (!isNaN(price)) {
+        return YamiDOMHelpers.formatPrice(price);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract delivery/shipping fee information
+   * @returns {string} Delivery fee description
+   */
+  static getDeliveryFee() {
+    // Look for shipping information text
+    const bodyText = document.body.textContent;
+
+    // Check for free shipping threshold
+    const freeShippingMatch = bodyText.match(/free\s+shipping\s+over\s+\$(\d+)/i);
+    if (freeShippingMatch) {
+      return `FREE (over $${freeShippingMatch[1]})`;
+    }
+
+    // Look for specific shipping cost
+    const shippingSelectors = [
+      '[data-qa="shipping-info"]',
+      '.shipping-info',
+      '.delivery-info',
+      '.item-shipping'
+    ];
+
+    for (const selector of shippingSelectors) {
+      const shippingElement = document.querySelector(selector);
+      if (shippingElement) {
+        const shippingText = shippingElement.textContent.trim();
+        if (shippingText) {
+          return shippingText;
+        }
+      }
+    }
+
+    // Check JSON-LD for shipping details
+    const jsonld = YamiDOMHelpers.extractJSONLD(document);
+    if (jsonld && jsonld.offers && jsonld.offers.shippingDetails) {
+      const shipping = jsonld.offers.shippingDetails;
+      if (shipping.shippingRate && shipping.shippingRate.value !== undefined) {
+        const rate = parseFloat(shipping.shippingRate.value);
+        if (rate === 0) {
+          return 'FREE';
+        }
+        return `$${rate.toFixed(2)}`;
+      }
+    }
+
+    // Default
+    return null;
+  }
+
+  /**
+   * Check if product is fulfilled by Yami (equivalent to Amazon Prime)
+   * @returns {boolean} True if fulfilled by Yami
+   */
+  static isFulfilledByYami() {
+    // Look for "Fulfilled by Yami" text in page
+    const bodyText = document.body.textContent;
+    if (bodyText.includes('Fulfilled by Yami') ||
+        bodyText.includes('Shipped by Yami') ||
+        bodyText.includes('Sold by Yami')) {
+      return true;
+    }
+
+    // Check for specific badge elements
+    const badgeSelectors = [
+      '.bff-item__badge',
+      '[data-qa="fulfillment-badge"]',
+      '.fulfillment-info',
+      '.seller-info'
+    ];
+
+    for (const selector of badgeSelectors) {
+      const badge = document.querySelector(selector);
+      if (badge) {
+        const badgeText = badge.textContent.toLowerCase();
+        if (badgeText.includes('fulfilled by yami') || badgeText.includes('shipped by yami')) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Extract product images with high-resolution URLs
+   * @returns {Array<string>} Array of image URLs (up to 10)
+   */
+  static getImages() {
+    const images = new Set(); // Use Set to avoid duplicates
+
+    // Strategy 1: JSON-LD images (most reliable)
+    const jsonld = YamiDOMHelpers.extractJSONLD(document);
+    if (jsonld && jsonld.image) {
+      if (Array.isArray(jsonld.image)) {
+        jsonld.image.forEach(url => {
+          const normalized = YamiDOMHelpers.normalizeURL(url);
+          const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
+          images.add(highRes);
+        });
+      } else if (typeof jsonld.image === 'string') {
+        const normalized = YamiDOMHelpers.normalizeURL(jsonld.image);
+        const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
+        images.add(highRes);
+      }
+    }
+
+    // Strategy 2: Product image gallery/carousel
+    const imageSelectors = [
+      '.bff-item__img',
+      '.product-image img',
+      '.gallery-image',
+      '[data-qa="product-image"]',
+      '.item-img img',
+      'img[src*="yamibuy.net"]'
+    ];
+
+    imageSelectors.forEach(selector => {
+      const imgs = document.querySelectorAll(selector);
+      imgs.forEach(img => {
+        const src = img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('data-lazy');
+        if (src && !src.includes('lazy.svg') && !src.includes('placeholder') && !src.includes('data:image')) {
+          const normalized = YamiDOMHelpers.normalizeURL(src);
+          const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
+          images.add(highRes);
+        }
+      });
+    });
+
+    // Strategy 3: Meta tags
+    const ogImage = document.querySelector('meta[property="og:image"]');
+    if (ogImage) {
+      const normalized = YamiDOMHelpers.normalizeURL(ogImage.getAttribute('content'));
+      const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
+      images.add(highRes);
+    }
+
+    // Convert Set to Array and limit to 10 images
+    return Array.from(images).filter(url => url && url.length > 0).slice(0, 10);
+  }
+
+  /**
+   * Extract product description
+   * @returns {string} Product description
+   */
+  static getDescription() {
+    // Strategy 1: JSON-LD description
+    const jsonld = YamiDOMHelpers.extractJSONLD(document);
+    if (jsonld && jsonld.description) {
+      return jsonld.description;
+    }
+
+    // Strategy 2: Look for description section
+    const descriptionSelectors = [
+      '.product-description',
+      '.item-description',
+      '.item-desc',
+      '[data-qa="description"]',
+      '.details-section',
+      '#product-details'
+    ];
+
+    for (const selector of descriptionSelectors) {
+      const descElement = document.querySelector(selector);
+      if (descElement) {
+        return descElement.textContent.trim();
+      }
+    }
+
+    // Strategy 3: Meta description
+    const metaDesc = document.querySelector('meta[name="description"], meta[property="og:description"]');
+    if (metaDesc) {
+      return metaDesc.getAttribute('content');
+    }
+
+    return '';
+  }
+
+  /**
+   * Extract bullet points / key features from "Product Highlights" section
+   * CRITICAL: Must extract from Product Highlights section, not just any list
+   * @returns {Array<string>} Array of bullet points
+   */
+  static getBulletPoints() {
+    const bulletPoints = [];
+
+    // Strategy 1: Look for "Product Highlights" section specifically
+    const allHeadings = document.querySelectorAll('h3, h4, .section-title, .title');
+    let highlightsSection = null;
+
+    for (const heading of allHeadings) {
+      const headingText = heading.textContent.trim().toLowerCase();
+      if (headingText.includes('product highlight') ||
+          headingText.includes('highlight') ||
+          headingText.includes('key feature') ||
+          headingText.includes('feature')) {
+        // Found the highlights heading, now find the list below it
+        let nextElement = heading.nextElementSibling;
+        while (nextElement) {
+          if (nextElement.tagName === 'UL' || nextElement.tagName === 'OL') {
+            highlightsSection = nextElement;
+            break;
+          }
+          if (nextElement.querySelector('ul, ol')) {
+            highlightsSection = nextElement.querySelector('ul, ol');
+            break;
+          }
+          nextElement = nextElement.nextElementSibling;
+        }
+        if (highlightsSection) break;
+      }
+    }
+
+    // Extract bullets from highlights section
+    if (highlightsSection) {
+      const bullets = highlightsSection.querySelectorAll('li');
+      bullets.forEach(bullet => {
+        const text = bullet.textContent.trim();
+        if (text && text.length > 0) {
+          bulletPoints.push(text);
+        }
+      });
+    }
+
+    // Strategy 2: Look for common bullet point containers (if highlights not found)
+    if (bulletPoints.length === 0) {
+      const bulletSelectors = [
+        '.item-desc__detail li',
+        '.product-features li',
+        '.key-features li',
+        '.highlights li',
+        '[data-qa="features"] li',
+        '.item-features li'
+      ];
+
+      for (const selector of bulletSelectors) {
+        const bullets = document.querySelectorAll(selector);
+        if (bullets.length > 0) {
+          bullets.forEach(bullet => {
+            const text = bullet.textContent.trim();
+            if (text && text.length > 0) {
+              bulletPoints.push(text);
+            }
+          });
+          break; // Use the first selector that finds results
+        }
+      }
+    }
+
+    // Strategy 3: Extract from description if no explicit bullets found
+    if (bulletPoints.length === 0) {
+      const description = this.getDescription();
+      if (description) {
+        const lines = description.split('\n').filter(line => line.trim().length > 20);
+        return lines.slice(0, 5); // Max 5 lines as bullet points
+      }
+    }
+
+    return bulletPoints;
+  }
+
+  /**
+   * Extract product specifications / attributes from "Details" section
+   * CRITICAL: Must extract from Details/Specification section
+   * @returns {Object} Key-value pairs of specifications
+   */
+  static getSpecifications() {
+    const specs = {};
+
+    // Strategy 1: Look for "Details" or "Specification" section
+    const allHeadings = document.querySelectorAll('h3, h4, .section-title, .title');
+    let specsSection = null;
+
+    for (const heading of allHeadings) {
+      const headingText = heading.textContent.trim().toLowerCase();
+      if (headingText.includes('detail') ||
+          headingText.includes('specification') ||
+          headingText.includes('attribute') ||
+          headingText.includes('information')) {
+        // Found the specs heading, find the content
+        let nextElement = heading.nextElementSibling;
+        while (nextElement) {
+          if (nextElement.tagName === 'TABLE' ||
+              nextElement.tagName === 'DL' ||
+              nextElement.classList.contains('specifications') ||
+              nextElement.classList.contains('details') ||
+              nextElement.classList.contains('attributes')) {
+            specsSection = nextElement;
+            break;
+          }
+          if (nextElement.querySelector('table, dl, .specifications, .details')) {
+            specsSection = nextElement.querySelector('table, dl, .specifications, .details');
+            break;
+          }
+          nextElement = nextElement.nextElementSibling;
+        }
+        if (specsSection) break;
+      }
+    }
+
+    // Extract from specs section
+    if (specsSection) {
+      // If it's a table
+      if (specsSection.tagName === 'TABLE') {
+        const rows = specsSection.querySelectorAll('tr');
+        rows.forEach(row => {
+          const cells = row.querySelectorAll('td, th');
+          if (cells.length >= 2) {
+            const key = cells[0].textContent.trim();
+            const value = cells[1].textContent.trim();
+            if (key && value) {
+              specs[key] = value;
+            }
+          }
+        });
+      }
+      // If it's a definition list
+      else if (specsSection.tagName === 'DL') {
+        const terms = specsSection.querySelectorAll('dt');
+        const definitions = specsSection.querySelectorAll('dd');
+        terms.forEach((term, index) => {
+          if (definitions[index]) {
+            const key = term.textContent.trim();
+            const value = definitions[index].textContent.trim();
+            if (key && value) {
+              specs[key] = value;
+            }
+          }
+        });
+      }
+      // If it's a div with key-value structure
+      else {
+        const rows = specsSection.querySelectorAll('tr, .spec-row, .detail-row');
+        rows.forEach(row => {
+          const cells = row.querySelectorAll('td, th, span, div');
+          if (cells.length >= 2) {
+            const key = cells[0].textContent.trim();
+            const value = cells[1].textContent.trim();
+            if (key && value) {
+              specs[key] = value;
+            }
+          }
+        });
+      }
+    }
+
+    // Strategy 2: Generic table/list selectors
+    if (Object.keys(specs).length === 0) {
+      const specSelectors = [
+        '.product-specs tr',
+        '.specifications tr',
+        '.product-attributes tr',
+        '[data-qa="specs"] tr',
+        '.details-table tr'
+      ];
+
+      for (const selector of specSelectors) {
+        const rows = document.querySelectorAll(selector);
+        if (rows.length > 0) {
+          rows.forEach(row => {
+            const cells = row.querySelectorAll('td, th');
+            if (cells.length >= 2) {
+              const key = cells[0].textContent.trim();
+              const value = cells[1].textContent.trim();
+              if (key && value) {
+                specs[key] = value;
+              }
+            }
+          });
+          if (Object.keys(specs).length > 0) break;
+        }
+      }
+    }
+
+    // Strategy 3: Look for definition lists
+    if (Object.keys(specs).length === 0) {
+      const dlSpecs = document.querySelectorAll('.specs dl, .specifications dl, .attributes dl, .details dl');
+      dlSpecs.forEach(dl => {
+        const terms = dl.querySelectorAll('dt');
+        const definitions = dl.querySelectorAll('dd');
+
+        terms.forEach((term, index) => {
+          if (definitions[index]) {
+            const key = term.textContent.trim();
+            const value = definitions[index].textContent.trim();
+            if (key && value) {
+              specs[key] = value;
+            }
+          }
+        });
+      });
+    }
+
+    return specs;
+  }
+
+  // ===== Parsed Document Extraction (for bulk scraping) =====
+
+  static extractTitleFromDoc(doc) {
+    const jsonld = YamiDOMHelpers.extractJSONLD(doc);
+    if (jsonld && jsonld.name) return jsonld.name;
+
+    const h1 = doc.querySelector('h1');
+    if (h1) return h1.textContent.trim();
+
+    const ogTitle = doc.querySelector('meta[property="og:title"]');
+    if (ogTitle) return ogTitle.getAttribute('content');
+
+    return null;
+  }
+
+  static extractPriceFromDoc(doc) {
+    const jsonld = YamiDOMHelpers.extractJSONLD(doc);
+    if (jsonld && jsonld.offers && jsonld.offers.price) {
+      const price = parseFloat(jsonld.offers.price);
+      if (!isNaN(price)) {
+        return YamiDOMHelpers.formatPrice(price);
+      }
+    }
+
+    const priceSelectors = [
+      '.item-price__valid',
+      '.bff-item__price--valid',
+      '.red-price',
+      '[data-qa="item-price"]'
+    ];
+
+    for (const selector of priceSelectors) {
+      const priceElement = doc.querySelector(selector);
+      if (priceElement) {
+        const priceText = priceElement.textContent.trim();
+        const price = YamiDOMHelpers.parsePrice(priceText);
+        if (price !== null && price > 0) {
+          return YamiDOMHelpers.formatPrice(price);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  static extractDeliveryFeeFromDoc(doc) {
+    const bodyText = doc.body.textContent;
+    const freeShippingMatch = bodyText.match(/free\s+shipping\s+over\s+\$(\d+)/i);
+    if (freeShippingMatch) {
+      return `FREE (over $${freeShippingMatch[1]})`;
+    }
+    return null;
+  }
+
+  static extractPrimeEligibilityFromDoc(doc) {
+    const bodyText = doc.body.textContent;
+    return bodyText.includes('Fulfilled by Yami') ||
+           bodyText.includes('Shipped by Yami') ||
+           bodyText.includes('Sold by Yami');
+  }
+
+  static extractImagesFromDoc(doc) {
+    const images = new Set();
+
+    const jsonld = YamiDOMHelpers.extractJSONLD(doc);
+    if (jsonld && jsonld.image) {
+      if (Array.isArray(jsonld.image)) {
+        jsonld.image.forEach(url => {
+          const normalized = YamiDOMHelpers.normalizeURL(url);
+          const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
+          images.add(highRes);
+        });
+      } else if (typeof jsonld.image === 'string') {
+        const normalized = YamiDOMHelpers.normalizeURL(jsonld.image);
+        const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
+        images.add(highRes);
+      }
+    }
+
+    const ogImage = doc.querySelector('meta[property="og:image"]');
+    if (ogImage) {
+      const normalized = YamiDOMHelpers.normalizeURL(ogImage.getAttribute('content'));
+      const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
+      images.add(highRes);
+    }
+
+    return Array.from(images).filter(url => url && url.length > 0).slice(0, 10);
+  }
+
+  static extractDescriptionFromDoc(doc) {
+    const jsonld = YamiDOMHelpers.extractJSONLD(doc);
+    if (jsonld && jsonld.description) {
+      return jsonld.description;
+    }
+
+    const metaDesc = doc.querySelector('meta[name="description"], meta[property="og:description"]');
+    if (metaDesc) {
+      return metaDesc.getAttribute('content');
+    }
+
+    return '';
+  }
+
+  static extractBulletPointsFromDoc(doc) {
+    const bulletPoints = [];
+
+    const allHeadings = doc.querySelectorAll('h3, h4');
+    for (const heading of allHeadings) {
+      const headingText = heading.textContent.trim().toLowerCase();
+      if (headingText.includes('product highlight') || headingText.includes('highlight')) {
+        let nextElement = heading.nextElementSibling;
+        while (nextElement) {
+          if (nextElement.tagName === 'UL' || nextElement.tagName === 'OL') {
+            const bullets = nextElement.querySelectorAll('li');
+            bullets.forEach(bullet => {
+              const text = bullet.textContent.trim();
+              if (text && text.length > 0) {
+                bulletPoints.push(text);
+              }
+            });
+            break;
+          }
+          nextElement = nextElement.nextElementSibling;
+        }
+        if (bulletPoints.length > 0) break;
+      }
+    }
+
+    return bulletPoints;
+  }
+
+  static extractSpecificationsFromDoc(doc) {
+    const specs = {};
+
+    const allHeadings = doc.querySelectorAll('h3, h4');
+    for (const heading of allHeadings) {
+      const headingText = heading.textContent.trim().toLowerCase();
+      if (headingText.includes('detail') || headingText.includes('specification')) {
+        let nextElement = heading.nextElementSibling;
+        while (nextElement) {
+          if (nextElement.tagName === 'TABLE') {
+            const rows = nextElement.querySelectorAll('tr');
+            rows.forEach(row => {
+              const cells = row.querySelectorAll('td, th');
+              if (cells.length >= 2) {
+                const key = cells[0].textContent.trim();
+                const value = cells[1].textContent.trim();
+                if (key && value) {
+                  specs[key] = value;
+                }
+              }
+            });
+            break;
+          }
+          nextElement = nextElement.nextElementSibling;
+        }
+        if (Object.keys(specs).length > 0) break;
+      }
+    }
+
+    return specs;
+  }
+
+  /**
+   * Extract product links from category/search page
+   * @returns {Array<Object>} Array of product link objects
+   */
+  static extractProductLinksFromPage() {
+    const productLinks = [];
+    const seenIDs = new Set();
+
+    const selectors = [
+      '.bff-item a[href*="/p/"]',
+      '.product-card a[href*="/p/"]',
+      'a[href*="/p/"]'
+    ];
+
+    selectors.forEach(selector => {
+      const links = document.querySelectorAll(selector);
+
+      links.forEach(link => {
+        const href = link.getAttribute('href');
+        if (!href) return;
+
+        // Extract product ID from URL pattern: /p/{slug}/{id}
+        const idMatch = href.match(/\/p\/[^\/]+\/(\d+)/);
+        if (idMatch && !seenIDs.has(idMatch[1])) {
+          const productID = idMatch[1];
+          seenIDs.add(productID);
+
+          const listingElement = YamiDOMHelpers.closest(link, '.bff-item') ||
+                                  YamiDOMHelpers.closest(link, '.product-card') ||
+                                  YamiDOMHelpers.closest(link, '[data-qa="product"]');
+
+          productLinks.push({
+            asin: productID, // Use "asin" for compatibility
+            url: YamiDOMHelpers.normalizeURL(href),
+            element: listingElement
+          });
+        }
+      });
+    });
+
+    return productLinks;
+  }
+
+  /**
+   * Extract data from a specific document (for fetched pages in bulk scraping)
+   * MUST MATCH Amazon format exactly
+   * @param {Document} doc - Document to extract from
+   * @param {string} productID - Product ID
+   * @param {string} url - Product URL
+   * @returns {Object} Product data
+   */
+  static extractFromDocument(doc, productID, url) {
+    return {
+      asin: productID,
+      url: url,
+      scrapedAt: new Date().toISOString(),
+      title: this.extractTitleFromDoc(doc),
+      price: this.extractPriceFromDoc(doc),
+      deliveryFee: this.extractDeliveryFeeFromDoc(doc),
+      isPrime: this.extractPrimeEligibilityFromDoc(doc),
+      images: this.extractImagesFromDoc(doc),
+      description: this.extractDescriptionFromDoc(doc),
+      bulletPoints: this.extractBulletPointsFromDoc(doc),
+      specifications: this.extractSpecificationsFromDoc(doc)
+    };
+  }
+}
+
+// Export for ES6 modules
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = YamiDataExtractor;
+}

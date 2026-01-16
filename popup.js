@@ -13,6 +13,7 @@ class PopupManager {
     this.loadOrders();
     this.setupEventListeners();
     this.setupTabListeners();
+    this.setupStorageListener();
   }
 
   setupEventListeners() {
@@ -29,6 +30,24 @@ class PopupManager {
         const tabName = e.target.dataset.tab;
         this.switchTab(tabName);
       });
+    });
+  }
+
+  setupStorageListener() {
+    // Listen for storage changes to auto-update the popup
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+      if (namespace === 'local') {
+        if (changes.scrapedProducts) {
+          this.products = changes.scrapedProducts.newValue || [];
+          this.renderProducts();
+          this.updateStats();
+        }
+        if (changes.scrapedOrders) {
+          this.orders = changes.scrapedOrders.newValue || [];
+          this.renderOrders();
+          this.updateOrderStats();
+        }
+      }
     });
   }
 
@@ -77,7 +96,7 @@ class PopupManager {
       container.innerHTML = `
         <div class="empty-state">
           <div class="empty-state-icon">🛍️</div>
-          <div class="empty-state-text">No products scraped yet.<br>Visit an Amazon product page and click "Scrape for eBay"</div>
+          <div class="empty-state-text">No products scraped yet.<br>Visit an Amazon or Yami product page and click "Scrape for eBay"</div>
         </div>
       `;
       return;

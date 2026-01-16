@@ -1,140 +1,39 @@
-// Content script that runs on Amazon product pages
-// Injects a scrape button and handles product data extraction
+/**
+ * Amazon Scraper Extension - Bundled Refactored Version
+ * All modules combined into a single file for Chrome extension compatibility
+ *
+ * Original structure:
+ * - src/utils/        (DOMHelpers, DataSanitizer, Validators)
+ * - src/extractors/   (DataExtractor)
+ * - src/scrapers/     (ProductScraper, BulkScraper)
+ * - src/address/      (AddressImporter)
+ * - src/ui/           (UIManager)
+ * - src/storage/      (StorageManager)
+ */
 
-class AmazonScraper {
-  constructor() {
-    this.scrapeButton = null;
-    this.primeOnlyMode = false; // Global Prime-only setting
-    this.init();
+"use strict";
+
+
+
+// ========================================
+// DOMHELPERS MODULE
+// ========================================
+
+/**
+ * DOM Helper Utilities
+ * Provides reusable DOM manipulation and query methods
+ */
+class DOMHelpers {
+  static sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  init() {
-    // Load Prime-only setting from storage
-    chrome.storage.local.get(['primeOnlyMode'], (result) => {
-      this.primeOnlyMode = result.primeOnlyMode || false;
-    });
-
-    // Wait for page to load
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => {
-        this.injectScrapeButton();
-        this.checkAddressPage();
-      });
-    } else {
-      this.injectScrapeButton();
-      this.checkAddressPage();
-    }
-  }
-
-  checkAddressPage() {
-    // Check if we're on the Amazon addresses page
-    if (window.location.href.includes('/a/addresses')) {
-      if (window.location.href.includes('/a/addresses/add')) {
-        // We're on the add address form page - check if we should auto-fill
-        this.checkAndFillAddress();
-      } else if (window.location.href.includes('alertId=yaab-enterAddressSucceed')) {
-        // Address was successfully added - continue import if in progress
-        this.continueImportAfterSuccess();
-      } else {
-        // We're on the main addresses page - inject import button
-        this.injectAddressImportButton();
-      }
-    }
-  }
-
-  continueImportAfterSuccess() {
-    // Check if we're in the middle of an import
-    const addressesJSON = sessionStorage.getItem('ebayAddressesToImport');
-    const currentIndex = parseInt(sessionStorage.getItem('currentAddressIndex') || '0');
-
-    if (!addressesJSON) {
-      return; // No import in progress
-    }
-
-    const addresses = JSON.parse(addressesJSON);
-
-    if (currentIndex >= addresses.length) {
-      // All done!
-      sessionStorage.removeItem('ebayAddressesToImport');
-      sessionStorage.removeItem('currentAddressIndex');
-      this.showNotification('✅ All addresses imported successfully!', 'success');
-      return;
-    }
-
-    // Continue to next address
-    this.showNotification(`Address saved! Loading next address...`, 'success');
-    setTimeout(() => {
-      window.location.href = 'https://www.amazon.com/a/addresses/add?ref=ebay_import';
-    }, 1000);
-  }
-
-  injectScrapeButton() {
-    // Check if we're on a product page or category/listing page
-    const isProduct = this.isProductPage();
-    const isCategoryPage = this.isCategoryPage();
-
-    if (!isProduct && !isCategoryPage) {
-      return;
-    }
-
-    // Create floating scrape button
-    this.scrapeButton = document.createElement('button');
-    this.scrapeButton.id = 'amazon-scraper-btn';
-
-    if (isProduct) {
-      this.scrapeButton.innerHTML = '📦 Scrape for eBay';
-    } else {
-      // Category page - show bulk scrape option
-      const itemCount = this.getVisibleProductCount();
-      this.scrapeButton.innerHTML = `📦 Scrape ${itemCount} Items`;
-    }
-
-    this.scrapeButton.style.cssText = `
-      position: fixed;
-      top: 100px;
-      right: 20px;
-      z-index: 10000;
-      padding: 12px 20px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: bold;
-      cursor: pointer;
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-      transition: all 0.3s ease;
-    `;
-
-    // Add hover effect
-    this.scrapeButton.addEventListener('mouseenter', () => {
-      this.scrapeButton.style.transform = 'scale(1.05)';
-      this.scrapeButton.style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.3)';
-    });
-
-    this.scrapeButton.addEventListener('mouseleave', () => {
-      this.scrapeButton.style.transform = 'scale(1)';
-      this.scrapeButton.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.2)';
-    });
-
-    // Add click handler - bulk scrape for category pages
-    if (isCategoryPage) {
-      this.scrapeButton.addEventListener('click', () => this.showBulkScrapeSettings());
-    } else {
-      this.scrapeButton.addEventListener('click', () => this.scrapeProduct());
-    }
-
-    document.body.appendChild(this.scrapeButton);
-  }
-
-  isProductPage() {
-    // Check if URL matches Amazon product page pattern
+  static isProductPage() {
     const url = window.location.href;
     return url.includes('/dp/') || url.includes('/gp/product/');
   }
 
-  isCategoryPage() {
-    // Check if we're on a category/listing page
+  static isCategoryPage() {
     const url = window.location.href;
     return url.includes('/s?') ||
            url.includes('/s/') ||
@@ -148,8 +47,19 @@ class AmazonScraper {
            url.includes('/gp/most-wished-for');
   }
 
-  getVisibleProductCount() {
-    // Count visible products on page
+  static isAddressPage() {
+    return window.location.href.includes('/a/addresses');
+  }
+
+  static isAddAddressPage() {
+    return window.location.href.includes('/a/addresses/add');
+  }
+
+  static isAddressSuccessPage() {
+    return window.location.href.includes('alertId=yaab-enterAddressSucceed');
+  }
+
+  static getVisibleProductCount() {
     const productSelectors = [
       '[data-asin]:not([data-asin=""])',
       '.s-result-item[data-asin]',
@@ -157,7 +67,7 @@ class AmazonScraper {
       '.a-carousel-card'
     ];
 
-    let products = new Set();
+    const products = new Set();
     productSelectors.forEach(selector => {
       const items = document.querySelectorAll(selector);
       items.forEach(item => {
@@ -171,416 +81,330 @@ class AmazonScraper {
     return products.size || 0;
   }
 
-  showBulkScrapeSettings() {
-    // Find all products first
-    const allProducts = this.extractProductLinksFromPage();
+  static extractASIN() {
+    const urlMatch = window.location.href.match(/\/dp\/([A-Z0-9]{10})/);
+    if (urlMatch) return urlMatch[1];
 
-    if (allProducts.length === 0) {
-      this.showNotification('❌ No products found on this page', 'error');
-      return;
-    }
+    const asinInput = document.querySelector('input[name="ASIN"]');
+    if (asinInput) return asinInput.value;
 
-    // Show settings modal
-    const settingsModal = this.createSettingsModal(allProducts);
-    document.body.appendChild(settingsModal);
+    return null;
   }
 
-  createSettingsModal(allProducts) {
-    // Extract price and Prime info from products
-    const productsWithMetadata = allProducts.map(p => {
-      const priceText = p.element?.querySelector('.a-price .a-offscreen, .a-price-whole, ._cDEzb_p13n-sc-price_3mJ9Z')?.textContent?.trim();
-      const price = this.parsePrice(priceText);
-      const isPrime = this.checkPrimeEligibilityFromElement(p.element);
-      return { ...p, price, priceText, isPrime };
-    });
-
-    const productsWithPrices = productsWithMetadata.filter(p => p.price > 0);
-    const primeProducts = productsWithMetadata.filter(p => p.isPrime);
-
-    const prices = productsWithPrices.map(p => p.price);
-    const minPrice = prices.length > 0 ? Math.floor(Math.min(...prices)) : 0;
-    const maxPrice = prices.length > 0 ? Math.ceil(Math.max(...prices)) : 100;
-
-    const modal = document.createElement('div');
-    modal.id = 'scraper-settings-modal';
-    modal.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.5);
-      z-index: 10003;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    `;
-
-    modal.innerHTML = `
-      <div style="background: white; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
-        <h2 style="margin: 0 0 20px 0; color: #333; font-size: 24px;">📦 Bulk Scrape Settings</h2>
-
-        <div style="margin-bottom: 25px;">
-          <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-            <span style="color: #666; font-size: 14px;">Products Found:</span>
-            <span style="color: #667eea; font-weight: 600; font-size: 16px;">${allProducts.length}</span>
-          </div>
-
-          <div style="margin: 20px 0;">
-            <label style="display: block; color: #666; font-size: 14px; margin-bottom: 10px;">
-              Number to Scrape: <span id="count-value" style="color: #667eea; font-weight: 600;">${allProducts.length}</span>
-            </label>
-            <input
-              type="range"
-              id="scrape-count-slider"
-              min="1"
-              max="${allProducts.length}"
-              value="${allProducts.length}"
-              style="width: 100%; height: 6px; border-radius: 3px; background: #e0e0e0; outline: none; -webkit-appearance: none;"
-            >
-            <div style="display: flex; justify-content: space-between; font-size: 12px; color: #999; margin-top: 5px;">
-              <span>1</span>
-              <span>${allProducts.length}</span>
-            </div>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 25px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
-          <label style="display: flex; align-items: center; margin-bottom: 15px; cursor: pointer;">
-            <input type="checkbox" id="enable-price-filter" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
-            <span style="color: #333; font-weight: 500;">Enable Price Filter</span>
-          </label>
-
-          <div id="price-filter-controls" style="opacity: 0.5; pointer-events: none; transition: opacity 0.3s;">
-            <div style="margin-bottom: 15px;">
-              <label style="display: block; color: #666; font-size: 13px; margin-bottom: 8px;">
-                Min Price: $<span id="min-price-value">${minPrice}</span>
-              </label>
-              <input
-                type="range"
-                id="min-price-slider"
-                min="${minPrice}"
-                max="${maxPrice}"
-                value="${minPrice}"
-                style="width: 100%; height: 6px; border-radius: 3px; background: #e0e0e0; outline: none; -webkit-appearance: none;"
-              >
-            </div>
-
-            <div style="margin-bottom: 15px;">
-              <label style="display: block; color: #666; font-size: 13px; margin-bottom: 8px;">
-                Max Price: $<span id="max-price-value">${maxPrice}</span>
-              </label>
-              <input
-                type="range"
-                id="max-price-slider"
-                min="${minPrice}"
-                max="${maxPrice}"
-                value="${maxPrice}"
-                style="width: 100%; height: 6px; border-radius: 3px; background: #e0e0e0; outline: none; -webkit-appearance: none;"
-              >
-            </div>
-
-            <div style="font-size: 13px; color: #666; padding: 10px; background: white; border-radius: 6px;">
-              <span id="filtered-count">${allProducts.length}</span> products match filters
-            </div>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 25px; padding: 20px; background: #e8f4fd; border-radius: 8px; border: 2px solid #3b82f6;">
-          <label style="display: flex; align-items: center; cursor: pointer;">
-            <input type="checkbox" id="prime-only-filter" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
-            <span style="color: #1e40af; font-weight: 600; display: flex; align-items: center;">
-              <span style="font-size: 18px; margin-right: 5px;">📦</span>
-              Prime Only (Skip non-Prime items)
-            </span>
-          </label>
-          <p style="margin: 10px 0 0 28px; font-size: 12px; color: #666;">
-            Only scrape products eligible for Amazon Prime shipping
-          </p>
-          <div id="prime-filter-info" style="margin: 10px 0 0 28px; font-size: 13px; color: #1e40af; padding: 10px; background: white; border-radius: 6px; display: none;">
-            <span id="prime-count">${primeProducts.length}</span> Prime products found
-          </div>
-        </div>
-
-        <div style="display: flex; gap: 10px; margin-top: 25px;">
-          <button id="start-scrape-btn" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 15px;">
-            Start Scraping
-          </button>
-          <button id="cancel-scrape-btn" style="flex: 1; padding: 12px; background: #e0e0e0; color: #666; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 15px;">
-            Cancel
-          </button>
-        </div>
-      </div>
-    `;
-
-    // Add event listeners
-    const countSlider = modal.querySelector('#scrape-count-slider');
-    const countValue = modal.querySelector('#count-value');
-    const enablePriceFilter = modal.querySelector('#enable-price-filter');
-    const priceFilterControls = modal.querySelector('#price-filter-controls');
-    const minPriceSlider = modal.querySelector('#min-price-slider');
-    const maxPriceSlider = modal.querySelector('#max-price-slider');
-    const minPriceValue = modal.querySelector('#min-price-value');
-    const maxPriceValue = modal.querySelector('#max-price-value');
-    const filteredCount = modal.querySelector('#filtered-count');
-    const startBtn = modal.querySelector('#start-scrape-btn');
-    const cancelBtn = modal.querySelector('#cancel-scrape-btn');
-
-    // Count slider
-    countSlider.addEventListener('input', (e) => {
-      countValue.textContent = e.target.value;
-    });
-
-    // Price filter toggle
-    enablePriceFilter.addEventListener('change', (e) => {
-      if (e.target.checked) {
-        priceFilterControls.style.opacity = '1';
-        priceFilterControls.style.pointerEvents = 'auto';
-      } else {
-        priceFilterControls.style.opacity = '0.5';
-        priceFilterControls.style.pointerEvents = 'none';
-      }
-      updateFilteredCount();
-    });
-
-    // Price sliders
-    const updateFilteredCount = () => {
-      const minPrice = parseInt(minPriceSlider.value);
-      const maxPrice = parseInt(maxPriceSlider.value);
-      const primeOnly = primeOnlyFilter.checked;
-
-      let filtered = productsWithMetadata;
-
-      // Apply price filter if enabled
-      if (enablePriceFilter.checked) {
-        filtered = filtered.filter(p => p.price >= minPrice && p.price <= maxPrice);
-      }
-
-      // Apply Prime filter if enabled
-      if (primeOnly) {
-        filtered = filtered.filter(p => p.isPrime);
-      }
-
-      filteredCount.textContent = filtered.length;
-    };
-
-    minPriceSlider.addEventListener('input', (e) => {
-      const value = parseInt(e.target.value);
-      minPriceValue.textContent = value;
-      if (value > parseInt(maxPriceSlider.value)) {
-        maxPriceSlider.value = value;
-        maxPriceValue.textContent = value;
-      }
-      updateFilteredCount();
-    });
-
-    maxPriceSlider.addEventListener('input', (e) => {
-      const value = parseInt(e.target.value);
-      maxPriceValue.textContent = value;
-      if (value < parseInt(minPriceSlider.value)) {
-        minPriceSlider.value = value;
-        minPriceValue.textContent = value;
-      }
-      updateFilteredCount();
-    });
-
-    // Get Prime filter reference
-    const primeOnlyFilter = modal.querySelector('#prime-only-filter');
-    const primeFilterInfo = modal.querySelector('#prime-filter-info');
-    const primeCount = modal.querySelector('#prime-count');
-
-    // Prime filter toggle
-    primeOnlyFilter.addEventListener('change', (e) => {
-      if (e.target.checked) {
-        primeFilterInfo.style.display = 'block';
-      } else {
-        primeFilterInfo.style.display = 'none';
-      }
-      updateFilteredCount();
-    });
-
-    // Start button
-    startBtn.addEventListener('click', () => {
-      const count = parseInt(countSlider.value);
-      const usePriceFilter = enablePriceFilter.checked;
-      const minPrice = parseInt(minPriceSlider.value);
-      const maxPrice = parseInt(maxPriceSlider.value);
-      const primeOnly = primeOnlyFilter.checked;
-
-      modal.remove();
-      this.bulkScrapeFromPage(allProducts, count, usePriceFilter, minPrice, maxPrice, primeOnly);
-    });
-
-    // Cancel button
-    cancelBtn.addEventListener('click', () => {
-      modal.remove();
-    });
-
-    // Close on background click
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
-        modal.remove();
-      }
-    });
-
-    return modal;
-  }
-
-  parsePrice(priceText) {
+  static parsePrice(priceText) {
     if (!priceText) return 0;
     const cleaned = priceText.replace(/[^0-9.]/g, '');
     const price = parseFloat(cleaned);
     return isNaN(price) ? 0 : price;
   }
 
-  async bulkScrapeFromPage(allProducts, maxCount, usePriceFilter, minPrice, maxPrice, primeOnly = false) {
-    try {
-      this.scrapeButton.innerHTML = '⏳ Filtering...';
-      this.scrapeButton.disabled = true;
+  static formatPhoneNumber(phoneNumber) {
+    if (!phoneNumber) return '';
 
-      // Store primeOnly for use in validation
-      this.primeOnlyMode = primeOnly;
+    const digitsOnly = phoneNumber.replace(/\D/g, '');
 
-      // Apply filters
-      let productLinks = allProducts;
+    if (digitsOnly.length === 10) {
+      return `+1 ${digitsOnly.substring(0, 3)}-${digitsOnly.substring(3, 6)}-${digitsOnly.substring(6)}`;
+    } else if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
+      return `+1 ${digitsOnly.substring(1, 4)}-${digitsOnly.substring(4, 7)}-${digitsOnly.substring(7)}`;
+    } else if (digitsOnly.length === 11) {
+      return `+1 ${digitsOnly.substring(1, 4)}-${digitsOnly.substring(4, 7)}-${digitsOnly.substring(7)}`;
+    } else {
+      return phoneNumber;
+    }
+  }
+}
 
-      // Filter by price if enabled
-      if (usePriceFilter) {
-        productLinks = productLinks.filter(p => {
-          const priceElement = p.element?.querySelector('.a-price .a-offscreen, .a-price-whole, ._cDEzb_p13n-sc-price_3mJ9Z');
-          const priceText = priceElement?.textContent?.trim();
-          const price = this.parsePrice(priceText);
-          return price >= minPrice && price <= maxPrice;
-        });
-      }
 
-      // Limit to max count
-      productLinks = productLinks.slice(0, maxCount);
 
-      if (productLinks.length === 0) {
-        throw new Error('No products found matching the filter criteria');
-      }
+// ========================================
+// DATASANITIZER MODULE
+// ========================================
 
-      // Create progress indicator UI
-      const progressUI = this.createProgressIndicator(productLinks.length);
-      document.body.appendChild(progressUI);
+/**
+ * Data Sanitizer
+ * Removes Amazon branding and sanitizes product data for reselling
+ */
+class DataSanitizer {
+  static sanitizeProductData(productData) {
+    const sanitized = JSON.parse(JSON.stringify(productData));
 
-      // Add stop button handler
-      let stopRequested = false;
-      const stopBtn = progressUI.querySelector('#stop-scraping-btn');
-      stopBtn.addEventListener('click', () => {
-        stopRequested = true;
-        stopBtn.textContent = '⏹ Stopping...';
-        stopBtn.disabled = true;
-        stopBtn.style.background = '#9ca3af';
+    if (sanitized.title) {
+      sanitized.title = this.removeAmazonBranding(sanitized.title);
+    }
+
+    if (sanitized.description) {
+      sanitized.description = this.removeAmazonBranding(sanitized.description);
+    }
+
+    if (sanitized.bulletPoints && Array.isArray(sanitized.bulletPoints)) {
+      sanitized.bulletPoints = sanitized.bulletPoints.map(bullet =>
+        this.removeAmazonBranding(bullet)
+      );
+    }
+
+    if (sanitized.specifications && typeof sanitized.specifications === 'object') {
+      Object.keys(sanitized.specifications).forEach(key => {
+        sanitized.specifications[key] = this.removeAmazonBranding(sanitized.specifications[key]);
       });
+    }
 
-      let successCount = 0;
-      let failCount = 0;
-      let skippedCount = 0;
-      let processedCount = 0;
+    if (sanitized.url) {
+      sanitized.originalAmazonUrl = sanitized.url;
+      sanitized.url = `Product ASIN: ${sanitized.asin}`;
+    }
 
-      // Process products in parallel batches for faster scraping
-      const BATCH_SIZE = 3; // Scrape 3 products at once
+    return sanitized;
+  }
 
-      for (let batchStart = 0; batchStart < productLinks.length; batchStart += BATCH_SIZE) {
-        // Check if stop was requested
-        if (stopRequested) {
-          console.log('Scraping stopped by user');
-          break;
+  static removeAmazonBranding(text) {
+    if (!text || typeof text !== 'string') return text;
+
+    const patterns = [
+      { pattern: /\bAmazon\.com\b/gi, replacement: '' },
+      { pattern: /\bAmazon\b/gi, replacement: '' },
+      { pattern: /\bAMZ\b/gi, replacement: '' },
+      { pattern: /\bamzn\b/gi, replacement: '' },
+      { pattern: /Amazon Prime/gi, replacement: '' },
+      { pattern: /Prime eligible/gi, replacement: '' },
+      { pattern: /Amazon's Choice/gi, replacement: '' },
+      { pattern: /Amazon Basics/gi, replacement: 'Basic' },
+      { pattern: /Amazon\.com Gift Card/gi, replacement: 'Gift Card' },
+      { pattern: /Ships from Amazon/gi, replacement: '' },
+      { pattern: /Sold by Amazon/gi, replacement: '' },
+      { pattern: /Fulfilled by Amazon/gi, replacement: '' },
+      { pattern: /\bFBA\b/gi, replacement: '' },
+      { pattern: /https?:\/\/(www\.)?amazon\.[a-z.]+\/[^\s]*/gi, replacement: '' },
+      { pattern: /www\.amazon\.[a-z]+/gi, replacement: '' },
+      { pattern: /\s+/g, replacement: ' ' },
+      { pattern: /\s,/g, replacement: ',' },
+      { pattern: /\s\./g, replacement: '.' },
+      { pattern: /^\s+|\s+$/g, replacement: '' },
+    ];
+
+    let sanitized = text;
+    patterns.forEach(({ pattern, replacement }) => {
+      sanitized = sanitized.replace(pattern, replacement);
+    });
+
+    return sanitized;
+  }
+}
+
+
+
+// ========================================
+// VALIDATORS MODULE
+// ========================================
+
+/**
+ * Product Validators
+ * Validates products based on various criteria
+ */
+class Validators {
+  static validateProduct(productData, primeOnly = false, getDeliveryDateFn = null) {
+    const errors = [];
+
+    if (!productData.price || productData.price === null || productData.price === '') {
+      errors.push('No price available - item may be out of stock');
+    }
+
+    if (getDeliveryDateFn) {
+      const deliveryDate = getDeliveryDateFn();
+      if (deliveryDate) {
+        const daysUntilDelivery = this.calculateDaysUntilDelivery(deliveryDate);
+        if (daysUntilDelivery !== null && daysUntilDelivery > 10) {
+          errors.push(`Delivery time too long (${daysUntilDelivery} days) - ships after ${deliveryDate}`);
         }
+      }
+    }
 
-        const batchEnd = Math.min(batchStart + BATCH_SIZE, productLinks.length);
-        const batch = productLinks.slice(batchStart, batchEnd);
+    if (primeOnly && productData.isPrime === false) {
+      errors.push('Not eligible for Amazon Prime shipping');
+    }
 
-        // Process batch in parallel
-        const batchPromises = batch.map(link => this.scrapeProductFromLink(link));
-        const batchResults = await Promise.allSettled(batchPromises);
+    return {
+      isValid: errors.length === 0,
+      errors: errors
+    };
+  }
 
-        // Process results
-        for (let i = 0; i < batchResults.length; i++) {
-          processedCount++;
-          this.updateProgressIndicator(progressUI, processedCount, productLinks.length, successCount, failCount, skippedCount);
+  static validateProductFromDoc(productData, primeOnly = false) {
+    const errors = [];
 
-          const result = batchResults[i];
+    if (!productData.price || productData.price === null || productData.price === '') {
+      errors.push('No price available');
+    }
 
-          if (result.status === 'fulfilled' && result.value && result.value.title) {
-            const productData = result.value;
+    if (primeOnly && productData.isPrime === false) {
+      errors.push('Not Prime eligible');
+    }
 
-            // Validate product (pass primeOnly flag)
-            const validation = this.validateProductFromDoc(productData, this.primeOnlyMode);
+    return {
+      isValid: errors.length === 0,
+      errors: errors
+    };
+  }
 
-            if (validation.isValid) {
-              // Sanitize data before saving
-              const sanitizedData = this.sanitizeProductData(productData);
+  static calculateDaysUntilDelivery(deliveryDateStr) {
+    if (!deliveryDateStr) return null;
 
-              // Use localStorage as fallback to prevent data loss on extension reload
-              try {
-                await this.saveProduct(sanitizedData);
-                successCount++;
-              } catch (error) {
-                // If chrome.storage fails, save to localStorage as backup
-                console.warn('chrome.storage failed, using localStorage:', error);
-                this.saveToLocalStorage(sanitizedData);
-                successCount++;
-              }
-            } else {
-              // Product failed validation - skip it
-              skippedCount++;
-              console.log(`Skipped product ${productData.asin}:`, validation.errors.join(', '));
-            }
-          } else {
-            failCount++;
-            if (result.status === 'rejected') {
-              console.error('Error scraping product:', result.reason);
-            }
-          }
-        }
+    try {
+      const currentYear = new Date().getFullYear();
+      const currentMonth = new Date().getMonth();
 
-        // Small delay between batches to avoid overwhelming Amazon
-        if (batchEnd < productLinks.length && !stopRequested) {
-          await this.sleep(100);
-        }
+      const cleanDate = deliveryDateStr.replace(/^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*/i, '').trim();
+      const deliveryDate = new Date(`${cleanDate}, ${currentYear}`);
+
+      if (deliveryDate.getMonth() < currentMonth) {
+        deliveryDate.setFullYear(currentYear + 1);
       }
 
-      // Remove progress UI
-      progressUI.remove();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      deliveryDate.setHours(0, 0, 0, 0);
 
-      // Show results
-      const resultParts = [];
-      if (stopRequested) {
-        resultParts.push(`⏸ Stopped: ${successCount} products scraped`);
-      } else {
-        resultParts.push(`✅ Scraped ${successCount} products successfully!`);
-      }
+      const diffTime = deliveryDate - today;
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-      if (skippedCount > 0) {
-        resultParts.push(`${skippedCount} skipped (no price/unavailable/non-Prime)`);
-      }
-      if (failCount > 0) {
-        resultParts.push(`${failCount} failed`);
-      }
-
-      this.showNotification(resultParts.join(' | '), stopRequested ? 'warning' : 'success');
-      this.scrapeButton.innerHTML = `✅ Scraped ${successCount}!`;
-
-      setTimeout(() => {
-        const newCount = this.getVisibleProductCount();
-        this.scrapeButton.innerHTML = `📦 Scrape ${newCount} Items`;
-        this.scrapeButton.disabled = false;
-      }, 3000);
-
+      return diffDays;
     } catch (error) {
-      console.error('Bulk scraping error:', error);
-      this.showNotification('❌ Error: ' + error.message, 'error');
-      const count = this.getVisibleProductCount();
-      this.scrapeButton.innerHTML = `📦 Scrape ${count} Items`;
-      this.scrapeButton.disabled = false;
+      console.error('Error parsing delivery date:', error);
+      return null;
+    }
+  }
+}
+
+
+
+// ========================================
+// STORAGEMANAGER MODULE
+// ========================================
+
+/**
+ * Storage Manager
+ * Handles all data persistence using Chrome storage and localStorage fallback
+ */
+class StorageManager {
+  static async saveProduct(productData) {
+    return new Promise((resolve, reject) => {
+      if (!chrome.runtime?.id) {
+        console.warn('Extension context invalidated, using localStorage');
+        this.saveToLocalStorage(productData);
+        resolve();
+        return;
+      }
+
+      try {
+        chrome.storage.local.get(['scrapedProducts'], (result) => {
+          if (chrome.runtime.lastError) {
+            console.warn('chrome.storage failed, using localStorage:', chrome.runtime.lastError);
+            this.saveToLocalStorage(productData);
+            resolve();
+            return;
+          }
+
+          const products = result.scrapedProducts || [];
+          const existingIndex = products.findIndex(p => p.asin === productData.asin);
+
+          if (existingIndex >= 0) {
+            products[existingIndex] = productData;
+          } else {
+            products.push(productData);
+          }
+
+          chrome.storage.local.set({ scrapedProducts: products }, () => {
+            if (chrome.runtime.lastError) {
+              console.warn('chrome.storage.set failed, using localStorage:', chrome.runtime.lastError);
+              this.saveToLocalStorage(productData);
+              resolve();
+            } else {
+              resolve();
+            }
+          });
+        });
+      } catch (error) {
+        console.warn('Extension context invalidated, using localStorage');
+        this.saveToLocalStorage(productData);
+        resolve();
+      }
+    });
+  }
+
+  static saveToLocalStorage(productData) {
+    try {
+      const stored = localStorage.getItem('scrapedProducts');
+      const products = stored ? JSON.parse(stored) : [];
+      const existingIndex = products.findIndex(p => p.asin === productData.asin);
+
+      if (existingIndex >= 0) {
+        products[existingIndex] = productData;
+      } else {
+        products.push(productData);
+      }
+
+      localStorage.setItem('scrapedProducts', JSON.stringify(products));
+    } catch (error) {
+      console.error('localStorage save failed:', error);
     }
   }
 
-  createProgressIndicator(total) {
+  static async getPrimeOnlyMode() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['primeOnlyMode'], (result) => {
+        resolve(result.primeOnlyMode || false);
+      });
+    });
+  }
+
+  static async setPrimeOnlyMode(value) {
+    return new Promise((resolve) => {
+      chrome.storage.local.set({ primeOnlyMode: value }, () => {
+        resolve();
+      });
+    });
+  }
+}
+
+
+
+// ========================================
+// UIMANAGER MODULE
+// ========================================
+
+/**
+ * UI Manager
+ * Handles all UI components: buttons, modals, notifications, progress indicators
+ */
+
+class UIManager {
+  static showNotification(message, type = 'info') {
+    const notification = document.createElement('div');
+    notification.textContent = message;
+    notification.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 10001;
+      padding: 15px 25px;
+      background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#3b82f6'};
+      color: white;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+      animation: slideIn 0.3s ease;
+    `;
+
+    document.body.appendChild(notification);
+
+    setTimeout(() => {
+      notification.style.animation = 'slideOut 0.3s ease';
+      setTimeout(() => notification.remove(), 300);
+    }, 3000);
+  }
+
+  static createProgressIndicator(total) {
     const progressContainer = document.createElement('div');
     progressContainer.id = 'amazon-scraper-progress';
     progressContainer.style.cssText = `
@@ -635,7 +459,6 @@ class AmazonScraper {
       </div>
     `;
 
-    // Add hover effect to stop button
     const stopBtn = progressContainer.querySelector('#stop-scraping-btn');
     stopBtn.addEventListener('mouseenter', () => {
       stopBtn.style.background = '#dc2626';
@@ -649,9 +472,8 @@ class AmazonScraper {
     return progressContainer;
   }
 
-  updateProgressIndicator(progressUI, current, total, successCount, failCount, skippedCount = 0) {
+  static updateProgressIndicator(progressUI, current, total, successCount, failCount, skippedCount = 0) {
     const percent = Math.round((current / total) * 100);
-
     progressUI.querySelector('#progress-text').textContent = `${current} / ${total}`;
     progressUI.querySelector('#progress-percent').textContent = `${percent}%`;
     progressUI.querySelector('#progress-bar').style.width = `${percent}%`;
@@ -661,531 +483,79 @@ class AmazonScraper {
     progressUI.querySelector('#current-item').textContent = `Product ${current}`;
   }
 
-  sanitizeProductData(productData) {
-    // Create a deep copy to avoid modifying original
-    const sanitized = JSON.parse(JSON.stringify(productData));
+  static injectStyles() {
+    if (document.getElementById('amazon-scraper-styles')) return;
 
-    // Sanitize title
-    if (sanitized.title) {
-      sanitized.title = this.removeAmazonBranding(sanitized.title);
-    }
-
-    // Sanitize description
-    if (sanitized.description) {
-      sanitized.description = this.removeAmazonBranding(sanitized.description);
-    }
-
-    // Sanitize bullet points
-    if (sanitized.bulletPoints && Array.isArray(sanitized.bulletPoints)) {
-      sanitized.bulletPoints = sanitized.bulletPoints.map(bullet =>
-        this.removeAmazonBranding(bullet)
-      );
-    }
-
-    // Sanitize specifications (values only, keep keys)
-    if (sanitized.specifications && typeof sanitized.specifications === 'object') {
-      Object.keys(sanitized.specifications).forEach(key => {
-        sanitized.specifications[key] = this.removeAmazonBranding(sanitized.specifications[key]);
-      });
-    }
-
-    // Remove Amazon URL from product URL (keep ASIN for reference)
-    // We keep the URL field but mark it as sanitized
-    if (sanitized.url) {
-      sanitized.originalAmazonUrl = sanitized.url; // Keep for reference
-      sanitized.url = `Product ASIN: ${sanitized.asin}`; // Replace with neutral text
-    }
-
-    return sanitized;
-  }
-
-  removeAmazonBranding(text) {
-    if (!text || typeof text !== 'string') return text;
-
-    // Patterns to remove/replace
-    const patterns = [
-      // Amazon brand mentions
-      { pattern: /\bAmazon\.com\b/gi, replacement: '' },
-      { pattern: /\bAmazon\b/gi, replacement: '' },
-      { pattern: /\bAMZ\b/gi, replacement: '' },
-      { pattern: /\bamzn\b/gi, replacement: '' },
-
-      // Amazon-specific terms
-      { pattern: /Amazon Prime/gi, replacement: '' },
-      { pattern: /Prime eligible/gi, replacement: '' },
-      { pattern: /Amazon's Choice/gi, replacement: '' },
-      { pattern: /Amazon Basics/gi, replacement: 'Basic' },
-
-      // Amazon services
-      { pattern: /Amazon\.com Gift Card/gi, replacement: 'Gift Card' },
-      { pattern: /Ships from Amazon/gi, replacement: '' },
-      { pattern: /Sold by Amazon/gi, replacement: '' },
-      { pattern: /Fulfilled by Amazon/gi, replacement: '' },
-      { pattern: /\bFBA\b/gi, replacement: '' },
-
-      // URLs (except in image URLs which we keep)
-      { pattern: /https?:\/\/(www\.)?amazon\.[a-z.]+\/[^\s]*/gi, replacement: '' },
-      { pattern: /www\.amazon\.[a-z]+/gi, replacement: '' },
-
-      // Clean up extra spaces and punctuation left behind
-      { pattern: /\s+/g, replacement: ' ' },
-      { pattern: /\s,/g, replacement: ',' },
-      { pattern: /\s\./g, replacement: '.' },
-      { pattern: /^\s+|\s+$/g, replacement: '' }, // trim
-    ];
-
-    let sanitized = text;
-
-    patterns.forEach(({ pattern, replacement }) => {
-      sanitized = sanitized.replace(pattern, replacement);
-    });
-
-    return sanitized;
-  }
-
-  extractProductLinksFromPage() {
-    const productLinks = [];
-    const seenAsins = new Set();
-
-    // Different selectors for different Amazon page types
-    const selectors = [
-      // Search results
-      '[data-asin]:not([data-asin=""]) h2 a',
-      '[data-asin]:not([data-asin=""]) .a-link-normal[href*="/dp/"]',
-
-      // Best sellers / New releases
-      '.zg-grid-general-faceout a[href*="/dp/"]',
-      '.zg-item-immersion a[href*="/dp/"]',
-
-      // General product links
-      'a[href*="/dp/"]'
-    ];
-
-    selectors.forEach(selector => {
-      const links = document.querySelectorAll(selector);
-
-      links.forEach(link => {
-        const href = link.getAttribute('href');
-        if (!href) return;
-
-        // Extract ASIN from URL
-        const asinMatch = href.match(/\/dp\/([A-Z0-9]{10})/);
-        if (asinMatch && !seenAsins.has(asinMatch[1])) {
-          seenAsins.add(asinMatch[1]);
-
-          // Get basic info from the listing
-          const listingElement = link.closest('[data-asin]') || link.closest('.s-result-item') || link.closest('.zg-grid-general-faceout');
-
-          productLinks.push({
-            asin: asinMatch[1],
-            url: href.startsWith('http') ? href : `https://www.amazon.com${href}`,
-            element: listingElement
-          });
+    const style = document.createElement('style');
+    style.id = 'amazon-scraper-styles';
+    style.textContent = `
+      @keyframes slideIn {
+        from {
+          transform: translateX(400px);
+          opacity: 0;
         }
-      });
-    });
-
-    return productLinks;
-  }
-
-  async scrapeProductFromLink(linkData) {
-    // Deep scrape: Fetch the product page and extract full details
-    const { asin, url } = linkData;
-
-    try {
-      // Fetch the product page HTML
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const html = await response.text();
-
-      // Create a temporary DOM parser
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-
-      // Now extract full product data from the fetched page
-      const productData = {
-        asin: asin,
-        url: url,
-        scrapedAt: new Date().toISOString(),
-        title: this.extractTitleFromDoc(doc),
-        price: this.extractPriceFromDoc(doc),
-        deliveryFee: this.extractDeliveryFeeFromDoc(doc),
-        isPrime: this.extractPrimeEligibilityFromDoc(doc),
-        images: this.extractImagesFromDoc(doc),
-        description: this.extractDescriptionFromDoc(doc),
-        bulletPoints: this.extractBulletPointsFromDoc(doc),
-        specifications: this.extractSpecificationsFromDoc(doc)
-      };
-
-      return productData;
-
-    } catch (error) {
-      console.error(`Error fetching product ${asin}:`, error);
-
-      // Fallback to basic data if fetch fails
-      return {
-        asin: asin,
-        url: url,
-        scrapedAt: new Date().toISOString(),
-        title: `Product ${asin}`,
-        price: null,
-        deliveryFee: null,
-        isPrime: false,
-        images: [],
-        description: `Error loading details: ${error.message}`,
-        bulletPoints: [],
-        specifications: {}
-      };
-    }
-  }
-
-  // Helper methods for extracting data from fetched HTML document
-  extractTitleFromDoc(doc) {
-    const selectors = ['#productTitle', '#title', 'h1.a-size-large'];
-    for (const selector of selectors) {
-      const element = doc.querySelector(selector);
-      if (element) return element.textContent.trim();
-    }
-    return null;
-  }
-
-  extractPriceFromDoc(doc) {
-    // CRITICAL: Only look for prices within the core price display container
-    // This prevents picking up incorrect prices from other parts of the page
-    // Use querySelector to get the FIRST occurrence (in case of duplicates)
-    const corePriceDisplay = doc.querySelector('#corePriceDisplay_desktop_feature_div');
-
-    if (corePriceDisplay) {
-      // Strategy 0: Look for .aok-offscreen (Amazon's accessibility class for screen readers)
-      const aokOffscreen = corePriceDisplay.querySelector('.aok-offscreen');
-      if (aokOffscreen) {
-        const priceText = aokOffscreen.textContent.trim();
-        // Validate it's a proper price format
-        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
-          return priceText;
+        to {
+          transform: translateX(0);
+          opacity: 1;
         }
       }
 
-      // Strategy 1: Look for .priceToPay with .a-price-whole (most reliable for current price)
-      const priceToPayWhole = corePriceDisplay.querySelector('.priceToPay .a-price-whole');
-      if (priceToPayWhole) {
-        const wholePart = priceToPayWhole.textContent.replace(/[^0-9]/g, '');
-        const fractionPart = corePriceDisplay.querySelector('.priceToPay .a-price-fraction');
-        if (wholePart) {
-          const fraction = fractionPart ? fractionPart.textContent.trim() : '00';
-          return `$${wholePart}.${fraction}`;
+      @keyframes slideOut {
+        from {
+          transform: translateX(0);
+          opacity: 1;
+        }
+        to {
+          transform: translateX(400px);
+          opacity: 0;
         }
       }
-
-      // Strategy 2: Look for .priceToPay .a-offscreen (current/deal price) within core display
-      const priceToPay = corePriceDisplay.querySelector('.priceToPay .a-offscreen');
-      if (priceToPay && priceToPay.textContent.trim()) {
-        const priceText = priceToPay.textContent.trim();
-        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
-          return priceText;
-        }
-      }
-
-      // Strategy 3: Look for .basisPrice (typical/list price) within core display
-      const basisPrice = corePriceDisplay.querySelector('.basisPrice .a-offscreen');
-      if (basisPrice && basisPrice.textContent.trim()) {
-        const priceText = basisPrice.textContent.trim();
-        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
-          return priceText;
-        }
-      }
-
-      // Strategy 4: Look for any .a-offscreen within core display that has a valid price
-      const offscreenPrices = corePriceDisplay.querySelectorAll('.a-offscreen');
-      for (const offscreen of offscreenPrices) {
-        const priceText = offscreen.textContent.trim();
-        // Match valid price format like $10.49 or $1,234.56
-        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
-          return priceText;
-        }
-      }
-
-      // Strategy 5: Build price from .a-price-whole and .a-price-fraction within core display
-      const priceWhole = corePriceDisplay.querySelector('.a-price-whole');
-      if (priceWhole) {
-        const wholePart = priceWhole.textContent.replace(/[^0-9]/g, '');
-        const fractionElement = priceWhole.parentElement?.querySelector('.a-price-fraction');
-        if (wholePart) {
-          const fraction = fractionElement ? fractionElement.textContent.trim() : '00';
-          return `$${wholePart}.${fraction}`;
-        }
-      }
-    }
-
-    // Fallback: Legacy selectors (only if core price display not found)
-    const legacySelectors = ['#priceblock_ourprice', '#priceblock_dealprice', '#price_inside_buybox'];
-    for (const selector of legacySelectors) {
-      const element = doc.querySelector(selector);
-      if (element && element.textContent.trim()) {
-        return element.textContent.trim();
-      }
-    }
-
-    return null;
+    `;
+    document.head.appendChild(style);
   }
+}
 
-  isUnitPriceContainerFromDoc(priceContainer) {
-    // Same logic as isUnitPriceContainer but for parsed documents
-    const containerText = priceContainer.textContent || '';
-    const parentText = priceContainer.parentElement?.textContent || '';
 
-    const unitPatterns = [
-      /\$[\d.]+\s*\/\s*(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)/i,
-      /\(\$[\d.]+\s*\/\s*(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)\)/i,
-      /per\s+(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)/i
-    ];
 
-    const textToCheck = containerText + ' ' + parentText;
-    return unitPatterns.some(pattern => pattern.test(textToCheck));
-  }
+// ========================================
+// DATAEXTRACTOR MODULE
+// ========================================
 
-  extractDeliveryFeeFromDoc(doc) {
-    const selectors = [
-      // Modern delivery/shipping selectors
-      '#deliveryMessageMirId span[data-csa-c-delivery-price]',
-      '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE .a-color-success',
-      '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE',
-      // Shipping price
-      '#ourprice_shippingmessage',
-      '#price-shipping-message',
-      '#price_shipping_message',
-      // Delivery block
-      '#delivery-message',
-      '#ddmDeliveryMessage',
-      // Free delivery indicators
-      '#fulfillerInfoFeature_feature_div .a-color-success',
-      '#deliveryBlockMessage',
-      // Alternative selectors
-      '[data-feature-name="delivery"] .a-color-price',
-      '#buybox-see-all-buying-choices span.a-color-secondary'
-    ];
+/**
+ * Data Extractor
+ * Extracts product information from Amazon product pages (live DOM and parsed HTML documents)
+ */
 
-    for (const selector of selectors) {
-      const element = doc.querySelector(selector);
-      if (element) {
-        const text = element.textContent.trim();
+class DataExtractor {
+  // ===== Current Page Extraction =====
 
-        // Check for "FREE" delivery/shipping
-        if (text.match(/free\s+(delivery|shipping)/i)) {
-          return 'FREE';
-        }
-
-        // Check for delivery price (e.g., "$5.99 delivery", "+ $3.50 shipping")
-        const priceMatch = text.match(/[\+]?\s*\$[\d.]+/);
-        if (priceMatch) {
-          return priceMatch[0].trim();
-        }
-      }
-    }
-
-    // Check for Prime badge (usually means free delivery)
-    const primeElement = doc.querySelector('#priceBadging_feature_div, .prime-logo, [aria-label*="Prime"]');
-    if (primeElement) {
-      const primeText = primeElement.textContent || primeElement.getAttribute('aria-label') || '';
-      if (primeText.match(/prime/i)) {
-        return 'FREE (Prime)';
-      }
-    }
-
-    return null;
-  }
-
-  extractPrimeEligibilityFromDoc(doc) {
-    // Check for Prime badge/logo in parsed document
-    const primeSelectors = [
-      '#priceBadging_feature_div [aria-label*="Prime"]',
-      '.prime-logo',
-      'i.a-icon-prime',
-      '[data-testid*="prime"]',
-      '#deliveryMessageMirId [aria-label*="Prime"]',
-      '#mir-layout-DELIVERY_BLOCK [aria-label*="Prime"]'
-    ];
-
-    for (const selector of primeSelectors) {
-      const element = doc.querySelector(selector);
-      if (element) {
-        const text = element.textContent || element.getAttribute('aria-label') || '';
-        if (text.match(/prime/i)) {
-          return true;
-        }
-      }
-    }
-
-    // Check delivery message for "Prime"
-    const deliverySelectors = [
-      '#deliveryMessageMirId',
-      '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE'
-    ];
-
-    for (const selector of deliverySelectors) {
-      const element = doc.querySelector(selector);
-      if (element && element.textContent.match(/prime/i)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  extractImagesFromDoc(doc) {
-    const images = [];
-    const mainImage = doc.querySelector('#landingImage, #imgBlkFront');
-    if (mainImage) {
-      const src = mainImage.getAttribute('data-old-hires') || mainImage.getAttribute('src');
-      if (src) images.push(src);
-    }
-
-    const thumbnails = doc.querySelectorAll('#altImages img, .imageThumbnail img');
-    thumbnails.forEach(img => {
-      const src = img.getAttribute('src');
-      if (src && !images.includes(src)) {
-        const highRes = src.replace(/\._.*_\./, '.');
-        images.push(highRes);
-      }
-    });
-
-    return images.slice(0, 10);
-  }
-
-  extractDescriptionFromDoc(doc) {
-    const selectors = ['#productDescription p', '#feature-bullets', '.a-section.a-spacing-medium'];
-    for (const selector of selectors) {
-      const element = doc.querySelector(selector);
-      if (element) return element.textContent.trim();
-    }
-    return '';
-  }
-
-  extractBulletPointsFromDoc(doc) {
-    const bullets = [];
-    const bulletElements = doc.querySelectorAll('#feature-bullets li, #featurebullets_feature_div li');
-    bulletElements.forEach(li => {
-      const text = li.textContent.trim();
-      if (text && text.length > 0) {
-        bullets.push(text);
-      }
-    });
-    return bullets;
-  }
-
-  extractSpecificationsFromDoc(doc) {
-    const specs = {};
-    const specTables = doc.querySelectorAll('#productDetails_techSpec_section_1 tr, #productDetails_detailBullets_sections1 tr');
-    specTables.forEach(row => {
-      const th = row.querySelector('th');
-      const td = row.querySelector('td');
-      if (th && td) {
-        specs[th.textContent.trim()] = td.textContent.trim();
-      }
-    });
-    return specs;
-  }
-
-  sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  async scrapeProduct() {
-    try {
-      // Change button state
-      this.scrapeButton.innerHTML = '⏳ Scraping...';
-      this.scrapeButton.disabled = true;
-
-      const productData = this.extractProductData();
-
-      if (!productData.title) {
-        throw new Error('Could not extract product information');
-      }
-
-      // Validate product before saving (use global primeOnlyMode setting)
-      const validation = this.validateProduct(productData, this.primeOnlyMode);
-      if (!validation.isValid) {
-        // Show popup with validation errors
-        const errorMessage = '❌ Cannot scrape this product:\n\n' + validation.errors.join('\n\n');
-        alert(errorMessage);
-
-        this.scrapeButton.innerHTML = '📦 Scrape for eBay';
-        this.scrapeButton.disabled = false;
-        return;
-      }
-
-      // Sanitize data before saving
-      const sanitizedData = this.sanitizeProductData(productData);
-
-      // Save to storage
-      await this.saveProduct(sanitizedData);
-
-      // Show success
-      this.showNotification('✅ Product scraped successfully!', 'success');
-      this.scrapeButton.innerHTML = '✅ Scraped!';
-
-      setTimeout(() => {
-        this.scrapeButton.innerHTML = '📦 Scrape for eBay';
-        this.scrapeButton.disabled = false;
-      }, 2000);
-
-    } catch (error) {
-      console.error('Scraping error:', error);
-      this.showNotification('❌ Error scraping product: ' + error.message, 'error');
-      this.scrapeButton.innerHTML = '📦 Scrape for eBay';
-      this.scrapeButton.disabled = false;
-    }
-  }
-
-  extractProductData() {
-    const data = {
-      asin: this.getASIN(),
+  static extractProductData() {
+    return {
+      asin: DOMHelpers.extractASIN(),
       title: this.getTitle(),
       price: this.getPrice(),
       deliveryFee: this.getDeliveryFee(),
+      isPrime: this.isPrimeEligible(),
       images: this.getImages(),
       description: this.getDescription(),
       bulletPoints: this.getBulletPoints(),
       specifications: this.getSpecifications(),
       url: window.location.href,
-      scrapedAt: new Date().toISOString()
+      scrapedAt: new Date().toISOString(),
+      source: 'amazon' // Add source field
     };
-
-    return data;
   }
 
-  getASIN() {
-    // Extract ASIN from URL or page
-    const urlMatch = window.location.href.match(/\/dp\/([A-Z0-9]{10})/);
-    if (urlMatch) return urlMatch[1];
-
-    const asinInput = document.querySelector('input[name="ASIN"]');
-    if (asinInput) return asinInput.value;
-
-    return null;
-  }
-
-  getTitle() {
-    const selectors = [
-      '#productTitle',
-      '#title',
-      'h1.a-size-large'
-    ];
-
+  static getTitle() {
+    const selectors = ['#productTitle', '#title', 'h1.a-size-large'];
     for (const selector of selectors) {
       const element = document.querySelector(selector);
-      if (element) {
-        return element.textContent.trim();
-      }
+      if (element) return element.textContent.trim();
     }
-
     return null;
   }
 
-  getPrice() {
+  static getPrice() {
     // CRITICAL: Only look for prices within the core price display container
     // This prevents picking up incorrect prices from other parts of the page
     // Use querySelector to get the FIRST occurrence (in case of duplicates)
@@ -1265,10 +635,7 @@ class AmazonScraper {
     return null;
   }
 
-  isUnitPriceText(priceText, element) {
-    // Check if the price text itself or surrounding context indicates it's a unit price
-
-    // Check the price text directly
+  static isUnitPriceText(priceText, element) {
     const unitPricePatterns = [
       /\$[\d.,]+\s*(per|\/)\s*(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)/i,
       /\(\$[\d.,]+\s*\/\s*(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)\)/i
@@ -1278,12 +645,9 @@ class AmazonScraper {
       return true;
     }
 
-    // Check surrounding context (parent and nearby text)
     if (element) {
       const parent = element.parentElement;
       const grandparent = parent?.parentElement;
-
-      // Check up to 3 levels of parent elements
       const contextTexts = [
         element.textContent || '',
         parent?.textContent || '',
@@ -1292,9 +656,7 @@ class AmazonScraper {
       ];
 
       for (const context of contextTexts) {
-        // Look for "per ounce", "per count", etc. in the surrounding text
         if (/per\s+(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)/i.test(context)) {
-          // Make sure the price we found is actually associated with this unit pricing
           if (context.includes(priceText)) {
             return true;
           }
@@ -1305,25 +667,68 @@ class AmazonScraper {
     return false;
   }
 
-  isUnitPriceContainer(priceContainer) {
-    // Check the container and its parent for unit price indicators
+  static isUnitPriceContainer(priceContainer) {
     const containerText = priceContainer.textContent || '';
     const parentText = priceContainer.parentElement?.textContent || '';
-
-    // Look for text patterns that indicate unit pricing
     const unitPatterns = [
       /\$[\d.]+\s*\/\s*(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)/i,
       /\(\$[\d.]+\s*\/\s*(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)\)/i,
       /per\s+(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)/i
     ];
-
-    // Check if container or parent contains unit price text
     const textToCheck = containerText + ' ' + parentText;
     return unitPatterns.some(pattern => pattern.test(textToCheck));
   }
 
-  checkPrimeEligibilityFromElement(element) {
-    // Check for Prime badge/logo within a product listing element
+  static isPrimeEligible() {
+    // Check within a-box-inner containers near pricing first
+    const boxInnerElements = document.querySelectorAll('.a-box-inner');
+    for (const box of boxInnerElements) {
+      const boxText = box.textContent || '';
+      if (boxText.match(/prime/i)) {
+        // Verify it's near price information
+        const hasPriceInfo = boxText.match(/\$[\d,]+\.?\d*/);
+        if (hasPriceInfo) {
+          return true;
+        }
+      }
+    }
+
+    const primeSelectors = [
+      '#priceBadging_feature_div [aria-label*="Prime"]',
+      '.prime-logo',
+      'i.a-icon-prime',
+      '[data-testid*="prime"]',
+      'span:contains("Prime")',
+      '#deliveryMessageMirId [aria-label*="Prime"]',
+      '#mir-layout-DELIVERY_BLOCK [aria-label*="Prime"]'
+    ];
+
+    for (const selector of primeSelectors) {
+      const element = document.querySelector(selector);
+      if (element) {
+        const text = element.textContent || element.getAttribute('aria-label') || '';
+        if (text.match(/prime/i)) {
+          return true;
+        }
+      }
+    }
+
+    const deliverySelectors = [
+      '#deliveryMessageMirId',
+      '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE'
+    ];
+
+    for (const selector of deliverySelectors) {
+      const element = document.querySelector(selector);
+      if (element && element.textContent.match(/prime/i)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  static checkPrimeEligibilityFromElement(element) {
     if (!element) return false;
 
     const primeSelectors = [
@@ -1345,10 +750,8 @@ class AmazonScraper {
       }
     }
 
-    // Check for "FREE delivery" or "FREE Shipping" text which often indicates Prime
     const deliveryText = element.textContent || '';
     if (deliveryText.match(/FREE.*delivery/i) || deliveryText.match(/FREE.*shipping/i)) {
-      // Additional check: make sure it's not just "FREE returns"
       if (!deliveryText.match(/FREE.*returns/i) || deliveryText.match(/Prime/i)) {
         return true;
       }
@@ -1357,64 +760,18 @@ class AmazonScraper {
     return false;
   }
 
-  isPrimeEligible() {
-    // Check for Prime badge/logo
-    const primeSelectors = [
-      '#priceBadging_feature_div [aria-label*="Prime"]',
-      '.prime-logo',
-      'i.a-icon-prime',
-      '[data-testid*="prime"]',
-      'span:contains("Prime")',
-      '#deliveryMessageMirId [aria-label*="Prime"]',
-      '#mir-layout-DELIVERY_BLOCK [aria-label*="Prime"]'
-    ];
-
-    for (const selector of primeSelectors) {
-      const element = document.querySelector(selector);
-      if (element) {
-        const text = element.textContent || element.getAttribute('aria-label') || '';
-        if (text.match(/prime/i)) {
-          return true;
-        }
-      }
-    }
-
-    // Check delivery message for "FREE delivery" with Prime
-    const deliverySelectors = [
-      '#deliveryMessageMirId',
-      '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE'
-    ];
-
-    for (const selector of deliverySelectors) {
-      const element = document.querySelector(selector);
-      if (element) {
-        const text = element.textContent || '';
-        if (text.match(/prime/i)) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  getDeliveryFee() {
+  static getDeliveryFee() {
     const selectors = [
-      // Modern delivery/shipping selectors
       '#deliveryMessageMirId span[data-csa-c-delivery-price]',
       '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE .a-color-success',
       '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE',
-      // Shipping price
       '#ourprice_shippingmessage',
       '#price-shipping-message',
       '#price_shipping_message',
-      // Delivery block
       '#delivery-message',
       '#ddmDeliveryMessage',
-      // Free delivery indicators
       '#fulfillerInfoFeature_feature_div .a-color-success',
       '#deliveryBlockMessage',
-      // Alternative selectors
       '[data-feature-name="delivery"] .a-color-price',
       '#buybox-see-all-buying-choices span.a-color-secondary'
     ];
@@ -1423,13 +780,9 @@ class AmazonScraper {
       const element = document.querySelector(selector);
       if (element) {
         const text = element.textContent.trim();
-
-        // Check for "FREE" delivery/shipping
         if (text.match(/free\s+(delivery|shipping)/i)) {
           return 'FREE';
         }
-
-        // Check for delivery price (e.g., "$5.99 delivery", "+ $3.50 shipping")
         const priceMatch = text.match(/[\+]?\s*\$[\d.]+/);
         if (priceMatch) {
           return priceMatch[0].trim();
@@ -1437,7 +790,6 @@ class AmazonScraper {
       }
     }
 
-    // Check for Prime badge (usually means free delivery)
     const primeElement = document.querySelector('#priceBadging_feature_div, .prime-logo, [aria-label*="Prime"]');
     if (primeElement) {
       const primeText = primeElement.textContent || primeElement.getAttribute('aria-label') || '';
@@ -1449,7 +801,7 @@ class AmazonScraper {
     return null;
   }
 
-  getDeliveryDate() {
+  static getDeliveryDate() {
     const selectors = [
       '#deliveryMessageMirId',
       '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE',
@@ -1462,10 +814,7 @@ class AmazonScraper {
       const element = document.querySelector(selector);
       if (element) {
         const text = element.textContent.trim();
-
-        // Look for date patterns like "January 15", "Jan 15", "Monday, January 15"
         const dateMatch = text.match(/(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?,?\s*(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}/i);
-
         if (dateMatch) {
           return dateMatch[0];
         }
@@ -1475,269 +824,938 @@ class AmazonScraper {
     return null;
   }
 
-  calculateDaysUntilDelivery(deliveryDateStr) {
-    if (!deliveryDateStr) return null;
-
-    try {
-      const currentYear = new Date().getFullYear();
-      const currentMonth = new Date().getMonth();
-
-      // Parse the delivery date string
-      const cleanDate = deliveryDateStr.replace(/^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*/i, '').trim();
-      const deliveryDate = new Date(`${cleanDate}, ${currentYear}`);
-
-      // If the parsed month is earlier than current month, it's probably next year
-      if (deliveryDate.getMonth() < currentMonth) {
-        deliveryDate.setFullYear(currentYear + 1);
-      }
-
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      deliveryDate.setHours(0, 0, 0, 0);
-
-      const diffTime = deliveryDate - today;
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-      return diffDays;
-    } catch (error) {
-      console.error('Error parsing delivery date:', error);
-      return null;
-    }
-  }
-
-  validateProduct(productData, primeOnly = false) {
-    const errors = [];
-
-    // Check if price exists
-    if (!productData.price || productData.price === null || productData.price === '') {
-      errors.push('No price available - item may be out of stock');
-    }
-
-    // Check delivery date
-    const deliveryDate = this.getDeliveryDate();
-    if (deliveryDate) {
-      const daysUntilDelivery = this.calculateDaysUntilDelivery(deliveryDate);
-      if (daysUntilDelivery !== null && daysUntilDelivery > 10) {
-        errors.push(`Delivery time too long (${daysUntilDelivery} days) - ships after ${deliveryDate}`);
-      }
-    }
-
-    // Check Prime eligibility if required
-    if (primeOnly && !this.isPrimeEligible()) {
-      errors.push('Not eligible for Amazon Prime shipping');
-    }
-
-    return {
-      isValid: errors.length === 0,
-      errors: errors
-    };
-  }
-
-  validateProductFromDoc(productData, primeOnly = false) {
-    const errors = [];
-
-    // Check if price exists
-    if (!productData.price || productData.price === null || productData.price === '') {
-      errors.push('No price available');
-    }
-
-    // Check Prime eligibility if required
-    if (primeOnly && productData.isPrime === false) {
-      errors.push('Not Prime eligible');
-    }
-
-    return {
-      isValid: errors.length === 0,
-      errors: errors
-    };
-  }
-
-  getImages() {
+  static getImages() {
     const images = [];
-
-    // Main image
     const mainImage = document.querySelector('#landingImage, #imgBlkFront');
     if (mainImage) {
-      const src = mainImage.getAttribute('data-old-hires') ||
-                  mainImage.getAttribute('src');
+      const src = mainImage.getAttribute('data-old-hires') || mainImage.getAttribute('src');
       if (src) images.push(src);
     }
 
-    // Thumbnail images
     const thumbnails = document.querySelectorAll('#altImages img, .imageThumbnail img');
     thumbnails.forEach(img => {
       const src = img.getAttribute('src');
       if (src && !images.includes(src)) {
-        // Try to get higher resolution version
         const highRes = src.replace(/\._.*_\./, '.');
         images.push(highRes);
       }
     });
 
-    return images.slice(0, 10); // Limit to 10 images
+    return images.slice(0, 10);
   }
 
-  getDescription() {
-    const selectors = [
-      '#productDescription p',
-      '#feature-bullets',
-      '.a-section.a-spacing-medium'
-    ];
-
+  static getDescription() {
+    const selectors = ['#productDescription p', '#feature-bullets', '.a-section.a-spacing-medium'];
     for (const selector of selectors) {
       const element = document.querySelector(selector);
-      if (element) {
-        return element.textContent.trim();
-      }
+      if (element) return element.textContent.trim();
     }
-
     return '';
   }
 
-  getBulletPoints() {
+  static getBulletPoints() {
     const bullets = [];
     const bulletElements = document.querySelectorAll('#feature-bullets li, #featurebullets_feature_div li');
-
     bulletElements.forEach(li => {
       const text = li.textContent.trim();
       if (text && text.length > 0) {
         bullets.push(text);
       }
     });
-
     return bullets;
   }
 
-  getSpecifications() {
+  static getSpecifications() {
     const specs = {};
-
-    // Try to find specification table
     const specTables = document.querySelectorAll('#productDetails_techSpec_section_1 tr, #productDetails_detailBullets_sections1 tr');
-
     specTables.forEach(row => {
       const th = row.querySelector('th');
       const td = row.querySelector('td');
-
       if (th && td) {
-        const key = th.textContent.trim();
-        const value = td.textContent.trim();
-        specs[key] = value;
+        specs[th.textContent.trim()] = td.textContent.trim();
       }
     });
-
     return specs;
   }
 
-  saveToLocalStorage(productData) {
-    try {
-      const stored = localStorage.getItem('scrapedProducts');
-      const products = stored ? JSON.parse(stored) : [];
+  // ===== Parsed Document Extraction =====
 
-      // Check if product already exists (by ASIN)
-      const existingIndex = products.findIndex(p => p.asin === productData.asin);
-
-      if (existingIndex >= 0) {
-        products[existingIndex] = productData;
-      } else {
-        products.push(productData);
-      }
-
-      localStorage.setItem('scrapedProducts', JSON.stringify(products));
-    } catch (error) {
-      console.error('localStorage save failed:', error);
+  static extractTitleFromDoc(doc) {
+    const selectors = ['#productTitle', '#title', 'h1.a-size-large'];
+    for (const selector of selectors) {
+      const element = doc.querySelector(selector);
+      if (element) return element.textContent.trim();
     }
+    return null;
   }
 
-  async saveProduct(productData) {
-    return new Promise((resolve, reject) => {
-      // Check if extension context is still valid
-      if (!chrome.runtime?.id) {
-        console.warn('Extension context invalidated, using localStorage');
-        this.saveToLocalStorage(productData);
-        resolve();
+  static extractPriceFromDoc(doc) {
+    // CRITICAL: Only look for prices within the core price display container
+    // This prevents picking up incorrect prices from other parts of the page
+    // Use querySelector to get the FIRST occurrence (in case of duplicates)
+    const corePriceDisplay = doc.querySelector('#corePriceDisplay_desktop_feature_div');
+
+    if (corePriceDisplay) {
+      // Strategy 0: Look for .aok-offscreen (Amazon's accessibility class for screen readers)
+      const aokOffscreen = corePriceDisplay.querySelector('.aok-offscreen');
+      if (aokOffscreen) {
+        const priceText = aokOffscreen.textContent.trim();
+        // Validate it's a proper price format
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 1: Look for .priceToPay with .a-price-whole (most reliable for current price)
+      const priceToPayWhole = corePriceDisplay.querySelector('.priceToPay .a-price-whole');
+      if (priceToPayWhole) {
+        const wholePart = priceToPayWhole.textContent.replace(/[^0-9]/g, '');
+        const fractionPart = corePriceDisplay.querySelector('.priceToPay .a-price-fraction');
+        if (wholePart) {
+          const fraction = fractionPart ? fractionPart.textContent.trim() : '00';
+          return `$${wholePart}.${fraction}`;
+        }
+      }
+
+      // Strategy 2: Look for .priceToPay .a-offscreen (current/deal price) within core display
+      const priceToPay = corePriceDisplay.querySelector('.priceToPay .a-offscreen');
+      if (priceToPay && priceToPay.textContent.trim()) {
+        const priceText = priceToPay.textContent.trim();
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 3: Look for .basisPrice (typical/list price) within core display
+      const basisPrice = corePriceDisplay.querySelector('.basisPrice .a-offscreen');
+      if (basisPrice && basisPrice.textContent.trim()) {
+        const priceText = basisPrice.textContent.trim();
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 4: Look for any .a-offscreen within core display that has a valid price
+      const offscreenPrices = corePriceDisplay.querySelectorAll('.a-offscreen');
+      for (const offscreen of offscreenPrices) {
+        const priceText = offscreen.textContent.trim();
+        // Match valid price format like $10.49 or $1,234.56
+        if (priceText && /^\$\d+(\,\d{3})*\.\d{2}$/.test(priceText)) {
+          return priceText;
+        }
+      }
+
+      // Strategy 5: Build price from .a-price-whole and .a-price-fraction within core display
+      const priceWhole = corePriceDisplay.querySelector('.a-price-whole');
+      if (priceWhole) {
+        const wholePart = priceWhole.textContent.replace(/[^0-9]/g, '');
+        const fractionElement = priceWhole.parentElement?.querySelector('.a-price-fraction');
+        if (wholePart) {
+          const fraction = fractionElement ? fractionElement.textContent.trim() : '00';
+          return `$${wholePart}.${fraction}`;
+        }
+      }
+    }
+
+    // Fallback: Legacy selectors (only if core price display not found)
+    const legacySelectors = ['#priceblock_ourprice', '#priceblock_dealprice', '#price_inside_buybox'];
+    for (const selector of legacySelectors) {
+      const element = doc.querySelector(selector);
+      if (element && element.textContent.trim()) {
+        return element.textContent.trim();
+      }
+    }
+
+    return null;
+  }
+
+  static isUnitPriceContainerFromDoc(priceContainer) {
+    const containerText = priceContainer.textContent || '';
+    const parentText = priceContainer.parentElement?.textContent || '';
+    const unitPatterns = [
+      /\$[\d.]+\s*\/\s*(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)/i,
+      /\(\$[\d.]+\s*\/\s*(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)\)/i,
+      /per\s+(fl\.?\s*oz|fluid\s*ounce|ounce|oz|count|each|lb|pound|kg|gram|item|piece)/i
+    ];
+    const textToCheck = containerText + ' ' + parentText;
+    return unitPatterns.some(pattern => pattern.test(textToCheck));
+  }
+
+  static extractDeliveryFeeFromDoc(doc) {
+    const selectors = [
+      '#deliveryMessageMirId span[data-csa-c-delivery-price]',
+      '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE .a-color-success',
+      '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE',
+      '#ourprice_shippingmessage',
+      '#price-shipping-message',
+      '#price_shipping_message',
+      '#delivery-message',
+      '#ddmDeliveryMessage',
+      '#fulfillerInfoFeature_feature_div .a-color-success',
+      '#deliveryBlockMessage',
+      '[data-feature-name="delivery"] .a-color-price',
+      '#buybox-see-all-buying-choices span.a-color-secondary'
+    ];
+
+    for (const selector of selectors) {
+      const element = doc.querySelector(selector);
+      if (element) {
+        const text = element.textContent.trim();
+        if (text.match(/free\s+(delivery|shipping)/i)) {
+          return 'FREE';
+        }
+        const priceMatch = text.match(/[\+]?\s*\$[\d.]+/);
+        if (priceMatch) {
+          return priceMatch[0].trim();
+        }
+      }
+    }
+
+    const primeElement = doc.querySelector('#priceBadging_feature_div, .prime-logo, [aria-label*="Prime"]');
+    if (primeElement) {
+      const primeText = primeElement.textContent || primeElement.getAttribute('aria-label') || '';
+      if (primeText.match(/prime/i)) {
+        return 'FREE (Prime)';
+      }
+    }
+
+    return null;
+  }
+
+  static extractPrimeEligibilityFromDoc(doc) {
+    // Check within a-box-inner containers near pricing first
+    const boxInnerElements = doc.querySelectorAll('.a-box-inner');
+    for (const box of boxInnerElements) {
+      const boxText = box.textContent || '';
+      if (boxText.match(/prime/i)) {
+        // Verify it's near price information
+        const hasPriceInfo = boxText.match(/\$[\d,]+\.?\d*/);
+        if (hasPriceInfo) {
+          return true;
+        }
+      }
+    }
+
+    const primeSelectors = [
+      '#priceBadging_feature_div [aria-label*="Prime"]',
+      '.prime-logo',
+      'i.a-icon-prime',
+      '[data-testid*="prime"]',
+      '#deliveryMessageMirId [aria-label*="Prime"]',
+      '#mir-layout-DELIVERY_BLOCK [aria-label*="Prime"]'
+    ];
+
+    for (const selector of primeSelectors) {
+      const element = doc.querySelector(selector);
+      if (element) {
+        const text = element.textContent || element.getAttribute('aria-label') || '';
+        if (text.match(/prime/i)) {
+          return true;
+        }
+      }
+    }
+
+    const deliverySelectors = [
+      '#deliveryMessageMirId',
+      '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE'
+    ];
+
+    for (const selector of deliverySelectors) {
+      const element = doc.querySelector(selector);
+      if (element && element.textContent.match(/prime/i)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  static extractImagesFromDoc(doc) {
+    const images = [];
+    const mainImage = doc.querySelector('#landingImage, #imgBlkFront');
+    if (mainImage) {
+      const src = mainImage.getAttribute('data-old-hires') || mainImage.getAttribute('src');
+      if (src) images.push(src);
+    }
+
+    const thumbnails = doc.querySelectorAll('#altImages img, .imageThumbnail img');
+    thumbnails.forEach(img => {
+      const src = img.getAttribute('src');
+      if (src && !images.includes(src)) {
+        const highRes = src.replace(/\._.*_\./, '.');
+        images.push(highRes);
+      }
+    });
+
+    return images.slice(0, 10);
+  }
+
+  static extractDescriptionFromDoc(doc) {
+    const selectors = ['#productDescription p', '#feature-bullets', '.a-section.a-spacing-medium'];
+    for (const selector of selectors) {
+      const element = doc.querySelector(selector);
+      if (element) return element.textContent.trim();
+    }
+    return '';
+  }
+
+  static extractBulletPointsFromDoc(doc) {
+    const bullets = [];
+    const bulletElements = doc.querySelectorAll('#feature-bullets li, #featurebullets_feature_div li');
+    bulletElements.forEach(li => {
+      const text = li.textContent.trim();
+      if (text && text.length > 0) {
+        bullets.push(text);
+      }
+    });
+    return bullets;
+  }
+
+  static extractSpecificationsFromDoc(doc) {
+    const specs = {};
+    const specTables = doc.querySelectorAll('#productDetails_techSpec_section_1 tr, #productDetails_detailBullets_sections1 tr');
+    specTables.forEach(row => {
+      const th = row.querySelector('th');
+      const td = row.querySelector('td');
+      if (th && td) {
+        specs[th.textContent.trim()] = td.textContent.trim();
+      }
+    });
+    return specs;
+  }
+
+  static extractProductLinksFromPage() {
+    const productLinks = [];
+    const seenAsins = new Set();
+
+    const selectors = [
+      '[data-asin]:not([data-asin=""]) h2 a',
+      '[data-asin]:not([data-asin=""]) .a-link-normal[href*="/dp/"]',
+      '.zg-grid-general-faceout a[href*="/dp/"]',
+      '.zg-item-immersion a[href*="/dp/"]',
+      'a[href*="/dp/"]'
+    ];
+
+    selectors.forEach(selector => {
+      const links = document.querySelectorAll(selector);
+      links.forEach(link => {
+        const href = link.getAttribute('href');
+        if (!href) return;
+
+        const asinMatch = href.match(/\/dp\/([A-Z0-9]{10})/);
+        if (asinMatch && !seenAsins.has(asinMatch[1])) {
+          seenAsins.add(asinMatch[1]);
+          const listingElement = link.closest('[data-asin]') || link.closest('.s-result-item') || link.closest('.zg-grid-general-faceout');
+
+          productLinks.push({
+            asin: asinMatch[1],
+            url: href.startsWith('http') ? href : `https://www.amazon.com${href}`,
+            element: listingElement
+          });
+        }
+      });
+    });
+
+    return productLinks;
+  }
+}
+
+
+
+// ========================================
+// PRODUCTSCRAPER MODULE
+// ========================================
+
+/**
+ * Product Scraper
+ * Handles scraping individual Amazon product pages
+ */
+
+
+
+
+
+class ProductScraper {
+  constructor() {
+    this.scrapeButton = null;
+    this.primeOnlyMode = false;
+  }
+
+  async init() {
+    this.primeOnlyMode = await StorageManager.getPrimeOnlyMode();
+    this.injectScrapeButton();
+  }
+
+  injectScrapeButton() {
+    this.scrapeButton = document.createElement('button');
+    this.scrapeButton.id = 'amazon-scraper-btn';
+    this.scrapeButton.innerHTML = '📦 Scrape for eBay';
+    this.scrapeButton.style.cssText = `
+      position: fixed;
+      top: 100px;
+      right: 20px;
+      z-index: 10000;
+      padding: 12px 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+      transition: all 0.3s ease;
+    `;
+
+    this.scrapeButton.addEventListener('mouseenter', () => {
+      this.scrapeButton.style.transform = 'scale(1.05)';
+      this.scrapeButton.style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.3)';
+    });
+
+    this.scrapeButton.addEventListener('mouseleave', () => {
+      this.scrapeButton.style.transform = 'scale(1)';
+      this.scrapeButton.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.2)';
+    });
+
+    this.scrapeButton.addEventListener('click', () => this.scrapeProduct());
+    document.body.appendChild(this.scrapeButton);
+  }
+
+  async scrapeProduct() {
+    try {
+      this.scrapeButton.innerHTML = '⏳ Scraping...';
+      this.scrapeButton.disabled = true;
+
+      const productData = DataExtractor.extractProductData();
+
+      if (!productData.title) {
+        throw new Error('Could not extract product information');
+      }
+
+      const validation = Validators.validateProduct(
+        productData,
+        this.primeOnlyMode,
+        () => DataExtractor.getDeliveryDate()
+      );
+
+      if (!validation.isValid) {
+        const errorMessage = '❌ Cannot scrape this product:\n\n' + validation.errors.join('\n\n');
+        alert(errorMessage);
+        this.scrapeButton.innerHTML = '📦 Scrape for eBay';
+        this.scrapeButton.disabled = false;
         return;
       }
 
-      try {
-        chrome.storage.local.get(['scrapedProducts'], (result) => {
-          // Check for extension context invalidation
-          if (chrome.runtime.lastError) {
-            console.warn('chrome.storage failed, using localStorage:', chrome.runtime.lastError);
-            this.saveToLocalStorage(productData);
-            resolve();
-            return;
-          }
+      const sanitizedData = DataSanitizer.sanitizeProductData(productData);
+      await StorageManager.saveProduct(sanitizedData);
 
-          const products = result.scrapedProducts || [];
+      UIManager.showNotification('✅ Product scraped successfully!', 'success');
+      this.scrapeButton.innerHTML = '✅ Scraped!';
 
-          // Check if product already exists (by ASIN)
-          const existingIndex = products.findIndex(p => p.asin === productData.asin);
+      setTimeout(() => {
+        this.scrapeButton.innerHTML = '📦 Scrape for eBay';
+        this.scrapeButton.disabled = false;
+      }, 2000);
 
-          if (existingIndex >= 0) {
-            // Update existing product
-            products[existingIndex] = productData;
-          } else {
-            // Add new product
-            products.push(productData);
-          }
+    } catch (error) {
+      console.error('Scraping error:', error);
+      UIManager.showNotification('❌ Error scraping product: ' + error.message, 'error');
+      this.scrapeButton.innerHTML = '📦 Scrape for eBay';
+      this.scrapeButton.disabled = false;
+    }
+  }
+}
 
-          chrome.storage.local.set({ scrapedProducts: products }, () => {
-            if (chrome.runtime.lastError) {
-              console.warn('chrome.storage.set failed, using localStorage:', chrome.runtime.lastError);
-              this.saveToLocalStorage(productData);
-              resolve();
-            } else {
-              resolve();
-            }
-          });
-        });
-      } catch (error) {
-        console.warn('Extension context invalidated, using localStorage');
-        this.saveToLocalStorage(productData);
-        resolve();
-      }
-    });
+
+
+// ========================================
+// BULKSCRAPER MODULE
+// ========================================
+
+/**
+ * Bulk Scraper
+ * Handles bulk scraping from Amazon category/listing pages
+ */
+
+
+
+
+
+
+class BulkScraper {
+  constructor() {
+    this.scrapeButton = null;
+    this.primeOnlyMode = false;
   }
 
-  showNotification(message, type = 'info') {
-    const notification = document.createElement('div');
-    notification.textContent = message;
-    notification.style.cssText = `
+  async init() {
+    this.primeOnlyMode = await StorageManager.getPrimeOnlyMode();
+    this.injectBulkScrapeButton();
+  }
+
+  injectBulkScrapeButton() {
+    const itemCount = DOMHelpers.getVisibleProductCount();
+    this.scrapeButton = document.createElement('button');
+    this.scrapeButton.id = 'amazon-scraper-btn';
+    this.scrapeButton.innerHTML = `📦 Scrape ${itemCount} Items`;
+    this.scrapeButton.style.cssText = `
       position: fixed;
-      top: 20px;
+      top: 100px;
       right: 20px;
-      z-index: 10001;
-      padding: 15px 25px;
-      background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#3b82f6'};
+      z-index: 10000;
+      padding: 12px 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
+      border: none;
       border-radius: 8px;
       font-size: 14px;
-      font-weight: 500;
+      font-weight: bold;
+      cursor: pointer;
       box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-      animation: slideIn 0.3s ease;
+      transition: all 0.3s ease;
     `;
 
-    document.body.appendChild(notification);
+    this.scrapeButton.addEventListener('mouseenter', () => {
+      this.scrapeButton.style.transform = 'scale(1.05)';
+      this.scrapeButton.style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.3)';
+    });
 
-    setTimeout(() => {
-      notification.style.animation = 'slideOut 0.3s ease';
-      setTimeout(() => notification.remove(), 300);
-    }, 3000);
+    this.scrapeButton.addEventListener('mouseleave', () => {
+      this.scrapeButton.style.transform = 'scale(1)';
+      this.scrapeButton.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.2)';
+    });
+
+    this.scrapeButton.addEventListener('click', () => this.showBulkScrapeSettings());
+    document.body.appendChild(this.scrapeButton);
   }
 
-  // ========== ADDRESS IMPORT FUNCTIONALITY ==========
+  showBulkScrapeSettings() {
+    const allProducts = DataExtractor.extractProductLinksFromPage();
 
-  injectAddressImportButton() {
-    // Check if button already exists
-    if (document.getElementById('ebay-address-import-btn')) {
+    if (allProducts.length === 0) {
+      UIManager.showNotification('❌ No products found on this page', 'error');
       return;
     }
 
-    // Create floating import button
-    const importButton = document.createElement('button');
-    importButton.id = 'ebay-address-import-btn';
-    importButton.innerHTML = '📦 Import eBay Addresses';
-    importButton.style.cssText = `
+    const settingsModal = this.createSettingsModal(allProducts);
+    document.body.appendChild(settingsModal);
+  }
+
+  createSettingsModal(allProducts) {
+    const productsWithMetadata = allProducts.map(p => {
+      const priceText = p.element?.querySelector('.a-price .a-offscreen, .a-price-whole, ._cDEzb_p13n-sc-price_3mJ9Z')?.textContent?.trim();
+      const price = DOMHelpers.parsePrice(priceText);
+      const isPrime = DataExtractor.checkPrimeEligibilityFromElement(p.element);
+      return { ...p, price, priceText, isPrime };
+    });
+
+    const productsWithPrices = productsWithMetadata.filter(p => p.price > 0);
+    const primeProducts = productsWithMetadata.filter(p => p.isPrime);
+    const prices = productsWithPrices.map(p => p.price);
+    const minPrice = prices.length > 0 ? Math.floor(Math.min(...prices)) : 0;
+    const maxPrice = prices.length > 0 ? Math.ceil(Math.max(...prices)) : 100;
+
+    const modal = document.createElement('div');
+    modal.id = 'scraper-settings-modal';
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 10003;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+
+    modal.innerHTML = `
+      <div style="background: white; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+        <h2 style="margin: 0 0 20px 0; color: #333; font-size: 24px;">📦 Bulk Scrape Settings</h2>
+
+        <div style="margin-bottom: 25px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+            <span style="color: #666; font-size: 14px;">Products Found:</span>
+            <span style="color: #667eea; font-weight: 600; font-size: 16px;">${allProducts.length}</span>
+          </div>
+
+          <div style="margin: 20px 0;">
+            <label style="display: block; color: #666; font-size: 14px; margin-bottom: 10px;">
+              Number to Scrape: <span id="count-value" style="color: #667eea; font-weight: 600;">${allProducts.length}</span>
+            </label>
+            <input type="range" id="scrape-count-slider" min="1" max="${allProducts.length}" value="${allProducts.length}"
+              style="width: 100%; height: 6px; border-radius: 3px; background: #e0e0e0; outline: none; -webkit-appearance: none;">
+            <div style="display: flex; justify-content: space-between; font-size: 12px; color: #999; margin-top: 5px;">
+              <span>1</span>
+              <span>${allProducts.length}</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 25px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+          <label style="display: flex; align-items: center; margin-bottom: 15px; cursor: pointer;">
+            <input type="checkbox" id="enable-price-filter" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+            <span style="color: #333; font-weight: 500;">Enable Price Filter</span>
+          </label>
+
+          <div id="price-filter-controls" style="opacity: 0.5; pointer-events: none; transition: opacity 0.3s;">
+            <div style="margin-bottom: 15px;">
+              <label style="display: block; color: #666; font-size: 13px; margin-bottom: 8px;">
+                Min Price: $<span id="min-price-value">${minPrice}</span>
+              </label>
+              <input type="range" id="min-price-slider" min="${minPrice}" max="${maxPrice}" value="${minPrice}"
+                style="width: 100%; height: 6px; border-radius: 3px; background: #e0e0e0; outline: none; -webkit-appearance: none;">
+            </div>
+
+            <div style="margin-bottom: 15px;">
+              <label style="display: block; color: #666; font-size: 13px; margin-bottom: 8px;">
+                Max Price: $<span id="max-price-value">${maxPrice}</span>
+              </label>
+              <input type="range" id="max-price-slider" min="${minPrice}" max="${maxPrice}" value="${maxPrice}"
+                style="width: 100%; height: 6px; border-radius: 3px; background: #e0e0e0; outline: none; -webkit-appearance: none;">
+            </div>
+
+            <div style="font-size: 13px; color: #666; padding: 10px; background: white; border-radius: 6px;">
+              <span id="filtered-count">${allProducts.length}</span> products match filters
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 25px; padding: 20px; background: #e8f4fd; border-radius: 8px; border: 2px solid #3b82f6;">
+          <label style="display: flex; align-items: center; cursor: pointer;">
+            <input type="checkbox" id="prime-only-filter" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+            <span style="color: #1e40af; font-weight: 600; display: flex; align-items: center;">
+              <span style="font-size: 18px; margin-right: 5px;">📦</span>
+              Prime Only (Skip non-Prime items)
+            </span>
+          </label>
+          <p style="margin: 10px 0 0 28px; font-size: 12px; color: #666;">
+            Only scrape products eligible for Amazon Prime shipping
+          </p>
+          <div id="prime-filter-info" style="margin: 10px 0 0 28px; font-size: 13px; color: #1e40af; padding: 10px; background: white; border-radius: 6px; display: none;">
+            <span id="prime-count">${primeProducts.length}</span> Prime products found
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 25px;">
+          <button id="start-scrape-btn" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 15px;">
+            Start Scraping
+          </button>
+          <button id="cancel-scrape-btn" style="flex: 1; padding: 12px; background: #e0e0e0; color: #666; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 15px;">
+            Cancel
+          </button>
+        </div>
+      </div>
+    `;
+
+    this.attachModalEventListeners(modal, allProducts, productsWithMetadata);
+    return modal;
+  }
+
+  attachModalEventListeners(modal, allProducts, productsWithMetadata) {
+    const countSlider = modal.querySelector('#scrape-count-slider');
+    const countValue = modal.querySelector('#count-value');
+    const enablePriceFilter = modal.querySelector('#enable-price-filter');
+    const priceFilterControls = modal.querySelector('#price-filter-controls');
+    const minPriceSlider = modal.querySelector('#min-price-slider');
+    const maxPriceSlider = modal.querySelector('#max-price-slider');
+    const minPriceValue = modal.querySelector('#min-price-value');
+    const maxPriceValue = modal.querySelector('#max-price-value');
+    const filteredCount = modal.querySelector('#filtered-count');
+    const primeOnlyFilter = modal.querySelector('#prime-only-filter');
+    const primeFilterInfo = modal.querySelector('#prime-filter-info');
+    const startBtn = modal.querySelector('#start-scrape-btn');
+    const cancelBtn = modal.querySelector('#cancel-scrape-btn');
+
+    countSlider.addEventListener('input', (e) => {
+      countValue.textContent = e.target.value;
+    });
+
+    const updateFilteredCount = () => {
+      const minPrice = parseInt(minPriceSlider.value);
+      const maxPrice = parseInt(maxPriceSlider.value);
+      const primeOnly = primeOnlyFilter.checked;
+
+      let filtered = productsWithMetadata;
+
+      if (enablePriceFilter.checked) {
+        filtered = filtered.filter(p => p.price >= minPrice && p.price <= maxPrice);
+      }
+
+      if (primeOnly) {
+        filtered = filtered.filter(p => p.isPrime);
+      }
+
+      filteredCount.textContent = filtered.length;
+    };
+
+    enablePriceFilter.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        priceFilterControls.style.opacity = '1';
+        priceFilterControls.style.pointerEvents = 'auto';
+      } else {
+        priceFilterControls.style.opacity = '0.5';
+        priceFilterControls.style.pointerEvents = 'none';
+      }
+      updateFilteredCount();
+    });
+
+    minPriceSlider.addEventListener('input', (e) => {
+      const value = parseInt(e.target.value);
+      minPriceValue.textContent = value;
+      if (value > parseInt(maxPriceSlider.value)) {
+        maxPriceSlider.value = value;
+        maxPriceValue.textContent = value;
+      }
+      updateFilteredCount();
+    });
+
+    maxPriceSlider.addEventListener('input', (e) => {
+      const value = parseInt(e.target.value);
+      maxPriceValue.textContent = value;
+      if (value < parseInt(minPriceSlider.value)) {
+        minPriceSlider.value = value;
+        minPriceValue.textContent = value;
+      }
+      updateFilteredCount();
+    });
+
+    primeOnlyFilter.addEventListener('change', (e) => {
+      primeFilterInfo.style.display = e.target.checked ? 'block' : 'none';
+      updateFilteredCount();
+    });
+
+    startBtn.addEventListener('click', () => {
+      const count = parseInt(countSlider.value);
+      const usePriceFilter = enablePriceFilter.checked;
+      const minPrice = parseInt(minPriceSlider.value);
+      const maxPrice = parseInt(maxPriceSlider.value);
+      const primeOnly = primeOnlyFilter.checked;
+
+      modal.remove();
+      this.bulkScrapeFromPage(allProducts, count, usePriceFilter, minPrice, maxPrice, primeOnly);
+    });
+
+    cancelBtn.addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.remove();
+    });
+  }
+
+  async bulkScrapeFromPage(allProducts, maxCount, usePriceFilter, minPrice, maxPrice, primeOnly = false) {
+    try {
+      this.scrapeButton.innerHTML = '⏳ Filtering...';
+      this.scrapeButton.disabled = true;
+      this.primeOnlyMode = primeOnly;
+
+      let productLinks = allProducts;
+
+      if (usePriceFilter) {
+        productLinks = productLinks.filter(p => {
+          const priceElement = p.element?.querySelector('.a-price .a-offscreen, .a-price-whole, ._cDEzb_p13n-sc-price_3mJ9Z');
+          const priceText = priceElement?.textContent?.trim();
+          const price = DOMHelpers.parsePrice(priceText);
+          return price >= minPrice && price <= maxPrice;
+        });
+      }
+
+      productLinks = productLinks.slice(0, maxCount);
+
+      if (productLinks.length === 0) {
+        throw new Error('No products found matching the filter criteria');
+      }
+
+      const progressUI = UIManager.createProgressIndicator(productLinks.length);
+      document.body.appendChild(progressUI);
+
+      let stopRequested = false;
+      const stopBtn = progressUI.querySelector('#stop-scraping-btn');
+      stopBtn.addEventListener('click', () => {
+        stopRequested = true;
+        stopBtn.textContent = '⏹ Stopping...';
+        stopBtn.disabled = true;
+        stopBtn.style.background = '#9ca3af';
+      });
+
+      let successCount = 0;
+      let failCount = 0;
+      let skippedCount = 0;
+      let processedCount = 0;
+
+      const BATCH_SIZE = 3;
+
+      for (let batchStart = 0; batchStart < productLinks.length; batchStart += BATCH_SIZE) {
+        if (stopRequested) {
+          console.log('Scraping stopped by user');
+          break;
+        }
+
+        const batchEnd = Math.min(batchStart + BATCH_SIZE, productLinks.length);
+        const batch = productLinks.slice(batchStart, batchEnd);
+
+        const batchPromises = batch.map(link => this.scrapeProductFromLink(link));
+        const batchResults = await Promise.allSettled(batchPromises);
+
+        for (let i = 0; i < batchResults.length; i++) {
+          processedCount++;
+          UIManager.updateProgressIndicator(progressUI, processedCount, productLinks.length, successCount, failCount, skippedCount);
+
+          const result = batchResults[i];
+
+          if (result.status === 'fulfilled' && result.value && result.value.title) {
+            const productData = result.value;
+            const validation = Validators.validateProductFromDoc(productData, this.primeOnlyMode);
+
+            if (validation.isValid) {
+              const sanitizedData = DataSanitizer.sanitizeProductData(productData);
+
+              try {
+                await StorageManager.saveProduct(sanitizedData);
+                successCount++;
+              } catch (error) {
+                console.warn('chrome.storage failed, using localStorage:', error);
+                StorageManager.saveToLocalStorage(sanitizedData);
+                successCount++;
+              }
+            } else {
+              skippedCount++;
+              console.log(`Skipped product ${productData.asin}:`, validation.errors.join(', '));
+            }
+          } else {
+            failCount++;
+            if (result.status === 'rejected') {
+              console.error('Error scraping product:', result.reason);
+            }
+          }
+        }
+
+        if (batchEnd < productLinks.length && !stopRequested) {
+          await DOMHelpers.sleep(100);
+        }
+      }
+
+      progressUI.remove();
+
+      const resultParts = [];
+      if (stopRequested) {
+        resultParts.push(`⏸ Stopped: ${successCount} products scraped`);
+      } else {
+        resultParts.push(`✅ Scraped ${successCount} products successfully!`);
+      }
+
+      if (skippedCount > 0) {
+        resultParts.push(`${skippedCount} skipped (no price/unavailable/non-Prime)`);
+      }
+      if (failCount > 0) {
+        resultParts.push(`${failCount} failed`);
+      }
+
+      UIManager.showNotification(resultParts.join(' | '), stopRequested ? 'warning' : 'success');
+      this.scrapeButton.innerHTML = `✅ Scraped ${successCount}!`;
+
+      setTimeout(() => {
+        const newCount = DOMHelpers.getVisibleProductCount();
+        this.scrapeButton.innerHTML = `📦 Scrape ${newCount} Items`;
+        this.scrapeButton.disabled = false;
+      }, 3000);
+
+    } catch (error) {
+      console.error('Bulk scraping error:', error);
+      UIManager.showNotification('❌ Error: ' + error.message, 'error');
+      const count = DOMHelpers.getVisibleProductCount();
+      this.scrapeButton.innerHTML = `📦 Scrape ${count} Items`;
+      this.scrapeButton.disabled = false;
+    }
+  }
+
+  async scrapeProductFromLink(linkData) {
+    const { asin, url } = linkData;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const html = await response.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+
+      const productData = {
+        asin: asin,
+        url: url,
+        scrapedAt: new Date().toISOString(),
+        title: DataExtractor.extractTitleFromDoc(doc),
+        price: DataExtractor.extractPriceFromDoc(doc),
+        deliveryFee: DataExtractor.extractDeliveryFeeFromDoc(doc),
+        isPrime: DataExtractor.extractPrimeEligibilityFromDoc(doc),
+        images: DataExtractor.extractImagesFromDoc(doc),
+        description: DataExtractor.extractDescriptionFromDoc(doc),
+        bulletPoints: DataExtractor.extractBulletPointsFromDoc(doc),
+        specifications: DataExtractor.extractSpecificationsFromDoc(doc),
+        source: 'amazon' // Add source field
+      };
+
+      return productData;
+
+    } catch (error) {
+      console.error(`Error fetching product ${asin}:`, error);
+      return {
+        asin: asin,
+        url: url,
+        scrapedAt: new Date().toISOString(),
+        title: `Product ${asin}`,
+        price: null,
+        deliveryFee: null,
+        isPrime: false,
+        images: [],
+        description: `Error loading details: ${error.message}`,
+        bulletPoints: [],
+        specifications: {},
+        source: 'amazon' // Add source field
+      };
+    }
+  }
+}
+
+
+
+// ========================================
+// ADDRESSIMPORTER MODULE
+// ========================================
+
+/**
+ * Address Importer
+ * Handles importing eBay order addresses into Amazon
+ */
+
+
+class AddressImporter {
+  constructor() {
+    this.importButton = null;
+  }
+
+  init() {
+    if (DOMHelpers.isAddressPage()) {
+      if (DOMHelpers.isAddAddressPage()) {
+        this.checkAndFillAddress();
+      } else if (DOMHelpers.isAddressSuccessPage()) {
+        this.continueImportAfterSuccess();
+      } else {
+        this.injectAddressImportButton();
+      }
+    }
+  }
+
+  injectAddressImportButton() {
+    if (document.getElementById('ebay-address-import-btn')) return;
+
+    this.importButton = document.createElement('button');
+    this.importButton.id = 'ebay-address-import-btn';
+    this.importButton.innerHTML = '📦 Import eBay Addresses';
+    this.importButton.style.cssText = `
       position: fixed;
       top: 100px;
       right: 20px;
@@ -1754,23 +1772,21 @@ class AmazonScraper {
       transition: all 0.3s ease;
     `;
 
-    importButton.addEventListener('mouseenter', () => {
-      importButton.style.transform = 'scale(1.05)';
-      importButton.style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.3)';
+    this.importButton.addEventListener('mouseenter', () => {
+      this.importButton.style.transform = 'scale(1.05)';
+      this.importButton.style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.3)';
     });
 
-    importButton.addEventListener('mouseleave', () => {
-      importButton.style.transform = 'scale(1)';
-      importButton.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.2)';
+    this.importButton.addEventListener('mouseleave', () => {
+      this.importButton.style.transform = 'scale(1)';
+      this.importButton.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.2)';
     });
 
-    importButton.addEventListener('click', () => this.showAddressImportModal());
-
-    document.body.appendChild(importButton);
+    this.importButton.addEventListener('click', () => this.showAddressImportModal());
+    document.body.appendChild(this.importButton);
   }
 
   showAddressImportModal() {
-    // Create modal for uploading eBay orders JSON
     const modal = document.createElement('div');
     modal.id = 'address-import-modal';
     modal.style.cssText = `
@@ -1802,17 +1818,20 @@ class AmazonScraper {
           <label style="display: block; margin-bottom: 10px; font-weight: 600; color: #333;">
             Select eBay Orders JSON File:
           </label>
-          <input
-            type="file"
-            id="ebay-orders-file-input"
-            accept=".json,application/json"
-            style="width: 100%; padding: 10px; border: 2px dashed #d1d5db; border-radius: 8px; cursor: pointer; font-size: 13px;"
-          >
+          <input type="file" id="ebay-orders-file-input" accept=".json,application/json"
+            style="width: 100%; padding: 10px; border: 2px dashed #d1d5db; border-radius: 8px; cursor: pointer; font-size: 13px;">
         </div>
 
-        <div id="address-preview" style="display: none; margin-bottom: 20px; max-height: 200px; overflow-y: auto; background: #f9fafb; padding: 15px; border-radius: 8px;">
-          <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #666;">Addresses to Import:</h3>
-          <div id="address-list" style="font-size: 12px; color: #333;"></div>
+        <div id="address-preview" style="display: none; margin-bottom: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h3 style="margin: 0; font-size: 14px; color: #666;">Addresses to Import:</h3>
+            <div style="display: flex; gap: 10px;">
+              <button id="select-all-btn" style="padding: 4px 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500;">Select All</button>
+              <button id="deselect-all-btn" style="padding: 4px 10px; background: #6b7280; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500;">Deselect All</button>
+            </div>
+          </div>
+          <div id="address-list" style="font-size: 12px; color: #333; max-height: 250px; overflow-y: auto; background: #f9fafb; padding: 15px; border-radius: 8px;"></div>
+          <div id="selection-count" style="margin-top: 10px; font-size: 12px; color: #666; font-weight: 500;"></div>
         </div>
 
         <div style="display: flex; gap: 10px; margin-top: 25px;">
@@ -1828,14 +1847,35 @@ class AmazonScraper {
 
     document.body.appendChild(modal);
 
-    // Setup event listeners
     const fileInput = modal.querySelector('#ebay-orders-file-input');
     const startBtn = modal.querySelector('#start-import-btn');
     const cancelBtn = modal.querySelector('#cancel-import-btn');
     const addressPreview = modal.querySelector('#address-preview');
     const addressList = modal.querySelector('#address-list');
+    const selectAllBtn = modal.querySelector('#select-all-btn');
+    const deselectAllBtn = modal.querySelector('#deselect-all-btn');
+    const selectionCount = modal.querySelector('#selection-count');
 
     let ordersData = null;
+    let addresses = [];
+
+    const updateSelectionCount = () => {
+      const checkedCount = addressList.querySelectorAll('input[type="checkbox"]:checked').length;
+      selectionCount.textContent = `${checkedCount} of ${addresses.length} addresses selected`;
+
+      // Enable/disable start button based on selection
+      if (checkedCount > 0) {
+        startBtn.disabled = false;
+        startBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+        startBtn.style.color = 'white';
+        startBtn.style.cursor = 'pointer';
+      } else {
+        startBtn.disabled = true;
+        startBtn.style.background = '#d1d5db';
+        startBtn.style.color = '#6b7280';
+        startBtn.style.cursor = 'not-allowed';
+      }
+    };
 
     fileInput.addEventListener('change', async (e) => {
       const file = e.target.files[0];
@@ -1845,27 +1885,33 @@ class AmazonScraper {
         const text = await file.text();
         ordersData = JSON.parse(text);
 
-        // Extract unique addresses
-        const addresses = this.extractAddressesFromOrders(ordersData);
+        addresses = this.extractAddressesFromOrders(ordersData);
 
         if (addresses.length === 0) {
           alert('No addresses found in the file.');
           return;
         }
 
-        // Show preview
         addressPreview.style.display = 'block';
         addressList.innerHTML = addresses.map((addr, i) => `
-          <div style="padding: 8px; margin-bottom: 5px; background: white; border-radius: 4px;">
-            ${i + 1}. ${addr.name} - ${addr.city}, ${addr.stateOrProvince} ${addr.postalCode}
-          </div>
+          <label style="display: flex; align-items: center; padding: 8px; margin-bottom: 5px; background: white; border-radius: 4px; cursor: pointer; transition: background 0.2s;"
+                 onmouseover="this.style.background='#f0f9ff'"
+                 onmouseout="this.style.background='white'">
+            <input type="checkbox" class="address-checkbox" data-index="${i}" checked
+                   style="margin-right: 10px; width: 16px; height: 16px; cursor: pointer;">
+            <span style="flex: 1;">
+              <strong>${i + 1}. ${addr.name}</strong><br>
+              <span style="color: #666; font-size: 11px;">${addr.addressLine1 || ''}, ${addr.city}, ${addr.stateOrProvince} ${addr.postalCode}</span>
+            </span>
+          </label>
         `).join('');
 
-        // Enable start button
-        startBtn.disabled = false;
-        startBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
-        startBtn.style.color = 'white';
-        startBtn.style.cursor = 'pointer';
+        // Add event listeners to checkboxes
+        addressList.querySelectorAll('.address-checkbox').forEach(checkbox => {
+          checkbox.addEventListener('change', updateSelectionCount);
+        });
+
+        updateSelectionCount();
 
       } catch (error) {
         alert('Error reading file: ' + error.message);
@@ -1873,20 +1919,41 @@ class AmazonScraper {
       }
     });
 
+    selectAllBtn.addEventListener('click', () => {
+      addressList.querySelectorAll('.address-checkbox').forEach(checkbox => {
+        checkbox.checked = true;
+      });
+      updateSelectionCount();
+    });
+
+    deselectAllBtn.addEventListener('click', () => {
+      addressList.querySelectorAll('.address-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+      });
+      updateSelectionCount();
+    });
+
     startBtn.addEventListener('click', () => {
       if (!ordersData) return;
-      modal.remove();
-      this.startAddressImport(ordersData);
-    });
 
-    cancelBtn.addEventListener('click', () => {
-      modal.remove();
-    });
+      // Get only selected addresses
+      const selectedIndices = Array.from(addressList.querySelectorAll('.address-checkbox:checked'))
+        .map(checkbox => parseInt(checkbox.dataset.index));
 
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
-        modal.remove();
+      if (selectedIndices.length === 0) {
+        alert('Please select at least one address to import.');
+        return;
       }
+
+      const selectedAddresses = selectedIndices.map(i => addresses[i]);
+
+      modal.remove();
+      this.startAddressImport(ordersData, selectedAddresses);
+    });
+
+    cancelBtn.addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.remove();
     });
   }
 
@@ -1901,7 +1968,6 @@ class AmazonScraper {
     ordersData.orders.forEach(order => {
       if (order.shippingAddress) {
         const addr = order.shippingAddress;
-        // Create unique key to avoid duplicates
         const key = `${addr.name}|${addr.addressLine1}|${addr.city}|${addr.postalCode}`;
 
         if (!seen.has(key)) {
@@ -1914,54 +1980,65 @@ class AmazonScraper {
     return addresses;
   }
 
-  async startAddressImport(ordersData) {
-    const addresses = this.extractAddressesFromOrders(ordersData);
+  async startAddressImport(ordersData, selectedAddresses = null) {
+    const addresses = selectedAddresses || this.extractAddressesFromOrders(ordersData);
 
     if (addresses.length === 0) {
-      this.showNotification('No addresses to import', 'error');
+      UIManager.showNotification('No addresses to import', 'error');
       return;
     }
 
-    // Store addresses in session storage for use across page navigations
     sessionStorage.setItem('ebayAddressesToImport', JSON.stringify(addresses));
     sessionStorage.setItem('currentAddressIndex', '0');
 
-    this.showNotification(`Starting import of ${addresses.length} addresses...`, 'info');
+    UIManager.showNotification(`Starting import of ${addresses.length} addresses...`, 'info');
 
-    // Navigate to add address page
+    setTimeout(() => {
+      window.location.href = 'https://www.amazon.com/a/addresses/add?ref=ebay_import';
+    }, 1000);
+  }
+
+  continueImportAfterSuccess() {
+    const addressesJSON = sessionStorage.getItem('ebayAddressesToImport');
+    const currentIndex = parseInt(sessionStorage.getItem('currentAddressIndex') || '0');
+
+    if (!addressesJSON) return;
+
+    const addresses = JSON.parse(addressesJSON);
+
+    if (currentIndex >= addresses.length) {
+      sessionStorage.removeItem('ebayAddressesToImport');
+      sessionStorage.removeItem('currentAddressIndex');
+      UIManager.showNotification('✅ All addresses imported successfully!', 'success');
+      return;
+    }
+
+    UIManager.showNotification(`Address saved! Loading next address...`, 'success');
     setTimeout(() => {
       window.location.href = 'https://www.amazon.com/a/addresses/add?ref=ebay_import';
     }, 1000);
   }
 
   checkAndFillAddress() {
-    // Check if we have addresses to import
     const addressesJSON = sessionStorage.getItem('ebayAddressesToImport');
     const currentIndex = parseInt(sessionStorage.getItem('currentAddressIndex') || '0');
 
-    if (!addressesJSON) {
-      return; // No import in progress
-    }
+    if (!addressesJSON) return;
 
     const addresses = JSON.parse(addressesJSON);
 
     if (currentIndex >= addresses.length) {
-      // All done!
       sessionStorage.removeItem('ebayAddressesToImport');
       sessionStorage.removeItem('currentAddressIndex');
-      this.showNotification('✅ All addresses imported successfully!', 'success');
+      UIManager.showNotification('✅ All addresses imported successfully!', 'success');
 
-      // Navigate back to addresses page
       setTimeout(() => {
         window.location.href = 'https://www.amazon.com/a/addresses';
       }, 2000);
       return;
     }
 
-    // Fill the form with current address
     const address = addresses[currentIndex];
-
-    // Wait for form to load
     setTimeout(() => {
       this.fillAddressForm(address, currentIndex + 1, addresses.length);
     }, 1000);
@@ -1969,7 +2046,6 @@ class AmazonScraper {
 
   fillAddressForm(address, current, total) {
     try {
-      // Common Amazon address form field IDs/names
       const fieldMappings = {
         fullName: ['address-ui-widgets-enterAddressFullName', 'address-ui-widgets-enterAddressFormContainer-fullName'],
         phoneNumber: ['address-ui-widgets-enterAddressPhoneNumber', 'address-ui-widgets-enterAddressFormContainer-phoneNumber'],
@@ -1993,10 +2069,8 @@ class AmazonScraper {
         return false;
       };
 
-      // Format phone number to +1 xxx-xxx-xxxx
-      const formattedPhone = this.formatPhoneNumber(address.phoneNumber || '');
+      const formattedPhone = DOMHelpers.formatPhoneNumber(address.phoneNumber || '');
 
-      // Fill in the form fields
       setValue(fieldMappings.fullName, address.name || '');
       setValue(fieldMappings.phoneNumber, formattedPhone);
       setValue(fieldMappings.addressLine1, address.addressLine1 || '');
@@ -2004,121 +2078,79 @@ class AmazonScraper {
       setValue(fieldMappings.city, address.city || '');
       setValue(fieldMappings.postalCode, address.postalCode || '');
 
-      // Set country if needed (usually US)
       const countrySelect = document.getElementById('address-ui-widgets-enterAddressFormContainer-country-dropdown-nativeId');
       if (countrySelect && address.countryCode) {
         countrySelect.value = address.countryCode;
         countrySelect.dispatchEvent(new Event('change', { bubbles: true }));
       }
 
-      // Handle state dropdown specially - Amazon uses a custom dropdown component
       setTimeout(() => {
         this.setStateDropdown(address.stateOrProvince);
       }, 300);
 
-      this.showNotification(`Importing address ${current} of ${total}...`, 'info');
+      UIManager.showNotification(`Importing address ${current} of ${total}...`, 'info');
 
-      // Auto-submit after a short delay to ensure form is fully populated
       setTimeout(() => {
         this.submitAddressAndNext();
       }, 1500);
 
     } catch (error) {
       console.error('Error filling form:', error);
-      this.showNotification('Error filling form. Please check the fields.', 'error');
+      UIManager.showNotification('Error filling form. Please check the fields.', 'error');
     }
   }
 
-  showAutoSubmitControls(current, total) {
-    // Remove existing controls if any
-    const existing = document.getElementById('auto-submit-controls');
-    if (existing) existing.remove();
+  setStateDropdown(stateValue) {
+    if (!stateValue) return;
 
-    const controls = document.createElement('div');
-    controls.id = 'auto-submit-controls';
-    controls.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 10004;
-      background: white;
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-      min-width: 300px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    `;
+    const stateSelectors = [
+      '#address-ui-widgets-enterAddressStateOrRegion-dropdown-nativeId',
+      'select[name="address-ui-widgets-enterAddressStateOrRegion"]',
+      '[aria-labelledby*="State"] select',
+      'select.a-native-dropdown'
+    ];
 
-    controls.innerHTML = `
-      <div style="margin-bottom: 15px;">
-        <div style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 5px;">
-          Address ${current} of ${total}
-        </div>
-        <div style="background: #e5e7eb; border-radius: 6px; height: 6px; overflow: hidden;">
-          <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); height: 100%; width: ${(current / total) * 100}%;"></div>
-        </div>
-      </div>
+    for (const selector of stateSelectors) {
+      const dropdown = document.querySelector(selector);
+      if (dropdown) {
+        const options = Array.from(dropdown.options);
+        const matchingOption = options.find(opt =>
+          opt.value === stateValue ||
+          opt.text === stateValue ||
+          opt.value.toLowerCase() === stateValue.toLowerCase() ||
+          opt.text.toLowerCase() === stateValue.toLowerCase()
+        );
 
-      <div style="margin-bottom: 15px; padding: 10px; background: #f0f9ff; border-radius: 6px; font-size: 12px; color: #1e40af;">
-        Please verify the address details are correct, then click "Submit & Next" to continue.
-      </div>
+        if (matchingOption) {
+          dropdown.value = matchingOption.value;
+          dropdown.dispatchEvent(new Event('change', { bubbles: true }));
+          dropdown.dispatchEvent(new Event('input', { bubbles: true }));
 
-      <div style="display: flex; gap: 10px;">
-        <button id="submit-and-next-btn" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px;">
-          Submit & Next
-        </button>
-        <button id="skip-address-btn" style="padding: 10px 15px; background: #f59e0b; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px;">
-          Skip
-        </button>
-        <button id="stop-import-btn" style="padding: 10px 15px; background: #ef4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px;">
-          Stop
-        </button>
-      </div>
-    `;
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+          nativeInputValueSetter.call(dropdown, matchingOption.value);
+          dropdown.dispatchEvent(new Event('change', { bubbles: true }));
 
-    document.body.appendChild(controls);
+          console.log('State set to:', matchingOption.value);
+          return true;
+        }
+      }
+    }
 
-    // Event listeners
-    controls.querySelector('#submit-and-next-btn').addEventListener('click', () => {
-      this.submitAddressAndNext();
-    });
-
-    controls.querySelector('#skip-address-btn').addEventListener('click', () => {
-      this.skipToNextAddress();
-    });
-
-    controls.querySelector('#stop-import-btn').addEventListener('click', () => {
-      sessionStorage.removeItem('ebayAddressesToImport');
-      sessionStorage.removeItem('currentAddressIndex');
-      controls.remove();
-      this.showNotification('Import stopped', 'warning');
-      setTimeout(() => {
-        window.location.href = 'https://www.amazon.com/a/addresses';
-      }, 1500);
-    });
+    console.warn('Could not set state dropdown for:', stateValue);
+    return false;
   }
 
   submitAddressAndNext() {
-    // Find and click the submit button - try multiple approaches
     const submitSelectors = [
-      // Direct button IDs and inputs
       '#address-ui-widgets-form-submit-button',
       'input[name="address-ui-widgets-form-submit-button"]',
       '#address-ui-widgets-form-submit-button-announce',
-
-      // Look for span elements that wrap the input (Amazon's button structure)
       'span.a-button-inner input[aria-labelledby*="submit"]',
       'span.a-button-inner input[type="submit"]',
-
-      // General submit buttons
       'button[type="submit"]',
       'input[type="submit"]',
-
-      // Amazon's primary button structure
       '.a-button-primary input',
       '.a-button-primary span input',
-
-      // By text content
       'span.a-button-text'
     ];
 
@@ -2128,11 +2160,9 @@ class AmazonScraper {
     for (const selector of submitSelectors) {
       const element = document.querySelector(selector);
       if (element) {
-        // Check if it's a span with text "Add address" or similar
         if (element.tagName === 'SPAN') {
           const text = element.textContent.trim().toLowerCase();
           if (text.includes('add address') || text.includes('submit')) {
-            // Find the actual input within or near this span
             const input = element.closest('.a-button-primary')?.querySelector('input[type="submit"]');
             if (input) {
               submitBtn = input;
@@ -2151,29 +2181,21 @@ class AmazonScraper {
     if (submitBtn) {
       console.log('Found submit button with selector:', foundSelector);
 
-      // Increment counter BEFORE submitting (so when Amazon redirects, we're ready for next)
       const currentIndex = parseInt(sessionStorage.getItem('currentAddressIndex') || '0');
       sessionStorage.setItem('currentAddressIndex', (currentIndex + 1).toString());
 
-      this.showNotification('Submitting address...', 'info');
+      UIManager.showNotification('Submitting address...', 'info');
 
-      // Try clicking both the element and via JavaScript
       submitBtn.click();
-
-      // Also try triggering via dispatchEvent
       submitBtn.dispatchEvent(new MouseEvent('click', {
         bubbles: true,
         cancelable: true,
         view: window
       }));
 
-      // Amazon will automatically redirect after successful submission
-      // Our continueImportAfterSuccess() will catch it and continue the import
-
       return;
     }
 
-    // If we still can't find it, log what buttons exist on the page for debugging
     console.warn('Could not find submit button. Available buttons:');
     document.querySelectorAll('button, input[type="submit"]').forEach(btn => {
       console.log('Button found:', {
@@ -2186,107 +2208,50 @@ class AmazonScraper {
       });
     });
 
-    this.showNotification('Could not find submit button. Please submit manually and click "Skip".', 'warning');
+    UIManager.showNotification('Could not find submit button. Please submit manually and click "Skip".', 'warning');
+  }
+}
+
+
+
+// ========================================
+// MAIN APPLICATION
+// ========================================
+
+class AmazonScraperApp {
+  constructor() {
+    this.productScraper = null;
+    this.bulkScraper = null;
+    this.addressImporter = null;
+    this.init();
   }
 
-  skipToNextAddress() {
-    const currentIndex = parseInt(sessionStorage.getItem('currentAddressIndex') || '0');
-    sessionStorage.setItem('currentAddressIndex', (currentIndex + 1).toString());
-    window.location.href = 'https://www.amazon.com/a/addresses/add?ref=ebay_import';
-  }
-
-  setStateDropdown(stateValue) {
-    if (!stateValue) return;
-
-    // Try multiple approaches to set the state dropdown
-    const stateSelectors = [
-      '#address-ui-widgets-enterAddressStateOrRegion-dropdown-nativeId',
-      'select[name="address-ui-widgets-enterAddressStateOrRegion"]',
-      '[aria-labelledby*="State"] select',
-      'select.a-native-dropdown'
-    ];
-
-    for (const selector of stateSelectors) {
-      const dropdown = document.querySelector(selector);
-      if (dropdown) {
-        // Find the option that matches the state (could be full name or abbreviation)
-        const options = Array.from(dropdown.options);
-        const matchingOption = options.find(opt =>
-          opt.value === stateValue ||
-          opt.text === stateValue ||
-          opt.value.toLowerCase() === stateValue.toLowerCase() ||
-          opt.text.toLowerCase() === stateValue.toLowerCase()
-        );
-
-        if (matchingOption) {
-          dropdown.value = matchingOption.value;
-          dropdown.dispatchEvent(new Event('change', { bubbles: true }));
-          dropdown.dispatchEvent(new Event('input', { bubbles: true }));
-
-          // Also trigger React/Vue events if the page uses them
-          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
-          nativeInputValueSetter.call(dropdown, matchingOption.value);
-          dropdown.dispatchEvent(new Event('change', { bubbles: true }));
-
-          console.log('State set to:', matchingOption.value);
-          return true;
-        }
-      }
+  async init() {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => this.initializeFeatures());
+    } else {
+      this.initializeFeatures();
     }
 
-    console.warn('Could not set state dropdown for:', stateValue);
-    return false;
+    UIManager.injectStyles();
   }
 
-  formatPhoneNumber(phoneNumber) {
-    if (!phoneNumber) return '';
+  async initializeFeatures() {
+    if (DOMHelpers.isProductPage()) {
+      this.productScraper = new ProductScraper();
+      await this.productScraper.init();
+    }
+    else if (DOMHelpers.isCategoryPage()) {
+      this.bulkScraper = new BulkScraper();
+      await this.bulkScraper.init();
+    }
 
-    // Remove all non-digit characters
-    const digitsOnly = phoneNumber.replace(/\D/g, '');
-
-    // Handle different phone number formats
-    if (digitsOnly.length === 10) {
-      // US phone number without country code: 6127498677 -> +1 612-749-8677
-      return `+1 ${digitsOnly.substring(0, 3)}-${digitsOnly.substring(3, 6)}-${digitsOnly.substring(6)}`;
-    } else if (digitsOnly.length === 11 && digitsOnly.startsWith('1')) {
-      // US phone number with country code: 16127498677 -> +1 612-749-8677
-      return `+1 ${digitsOnly.substring(1, 4)}-${digitsOnly.substring(4, 7)}-${digitsOnly.substring(7)}`;
-    } else if (digitsOnly.length === 11) {
-      // Other format with 11 digits
-      return `+1 ${digitsOnly.substring(1, 4)}-${digitsOnly.substring(4, 7)}-${digitsOnly.substring(7)}`;
-    } else {
-      // Fallback: return original if format is unexpected
-      return phoneNumber;
+    if (DOMHelpers.isAddressPage()) {
+      this.addressImporter = new AddressImporter();
+      this.addressImporter.init();
     }
   }
 }
 
-// Add CSS animations
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes slideIn {
-    from {
-      transform: translateX(400px);
-      opacity: 0;
-    }
-    to {
-      transform: translateX(0);
-      opacity: 1;
-    }
-  }
-
-  @keyframes slideOut {
-    from {
-      transform: translateX(0);
-      opacity: 1;
-    }
-    to {
-      transform: translateX(400px);
-      opacity: 0;
-    }
-  }
-`;
-document.head.appendChild(style);
-
-// Initialize scraper
-new AmazonScraper();
+// Initialize the application
+new AmazonScraperApp();
