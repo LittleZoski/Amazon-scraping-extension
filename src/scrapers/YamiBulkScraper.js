@@ -406,7 +406,8 @@ class YamiBulkScraper {
   }
 
   /**
-   * Scrape individual product from link by fetching its page
+   * Scrape individual product from link by opening it in a background tab
+   * This allows us to get the fully-rendered DOM with all lazy-loaded images
    * @param {Object} linkData - Product link data {productID, url, element}
    * @returns {Promise<Object>} Product data
    */
@@ -430,31 +431,33 @@ class YamiBulkScraper {
     }
 
     try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      // Send message to background script to open product in a background tab and scrape it
+      const response = await chrome.runtime.sendMessage({
+        action: 'SCRAPE_PRODUCT_IN_BACKGROUND_TAB',
+        url: url
+      });
+
+      // Check if scraping was successful
+      if (response.success) {
+        return response.data;
+      } else {
+        throw new Error(response.error || 'Unknown error');
       }
 
-      const html = await response.text();
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-
-      return YamiDataExtractor.extractFromDocument(doc, productID, url);
-
     } catch (error) {
-      console.error(`Error fetching Yami product ${productID}:`, error);
+      console.error(`Error scraping Yami product ${productID} in tab:`, error);
       return {
         asin: productID,
         url: url,
         scrapedAt: new Date().toISOString(),
         title: `Product ${productID}`,
         price: null,
-        deliveryFee: '$4.99', // Always set to 4.99 for Yami products
+        deliveryFee: '$4.99',
         images: [],
         description: `Error loading details: ${error.message}`,
         bulletPoints: [],
         specifications: {},
-        source: 'yami' // Add source field
+        source: 'yami'
       };
     }
   }

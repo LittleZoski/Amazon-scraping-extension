@@ -95,6 +95,32 @@ class YamiScraperApp {
   }
 }
 
+// Message listener for programmatic scraping (used by bulk scraper with background tabs)
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'SCRAPE_PRODUCT_IN_TAB') {
+    // This is a product page opened by the bulk scraper
+    // Wait for page to fully load, then scrape and send data back
+    const scrapeAndRespond = async () => {
+      try {
+        // Wait a bit for lazy loading to complete
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Extract product data using the same method as single product scraping
+        const productData = YamiDataExtractor.extractProductData();
+
+        // Send data back to the bulk scraper
+        sendResponse({ success: true, data: productData });
+      } catch (error) {
+        console.error('Error scraping product in tab:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    };
+
+    scrapeAndRespond();
+    return true; // Keep message channel open for async response
+  }
+});
+
 // Bootstrap the application
 // Wait a bit to ensure page is loaded
 setTimeout(() => {

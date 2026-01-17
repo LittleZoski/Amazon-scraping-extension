@@ -220,26 +220,16 @@ class YamiDataExtractor {
       if (content.includes('"@type":"Product"') || content.includes('"@type": "Product"')) {
         try {
           const jsonld = JSON.parse(content);
-          console.log('YamiDataExtractor.getImages - Found JSON-LD Product schema');
-          console.log('YamiDataExtractor.getImages - jsonld.image:', jsonld.image);
-          console.log('YamiDataExtractor.getImages - Is array?', Array.isArray(jsonld.image));
-          console.log('YamiDataExtractor.getImages - Length/Type:', Array.isArray(jsonld.image) ? jsonld.image.length : typeof jsonld.image);
 
           // Handle both array and single string for image field
           if (jsonld.image) {
             const imageUrls = Array.isArray(jsonld.image) ? jsonld.image : [jsonld.image];
-            console.log('YamiDataExtractor.getImages - imageUrls to process:', imageUrls);
 
             imageUrls.forEach((url, index) => {
-              console.log(`YamiDataExtractor.getImages - Processing image ${index}:`, url);
               if (url && !url.includes('logo') && !url.includes('placeholder')) {
                 // JSON-LD images are already in good quality, just normalize the URL
                 const normalized = YamiDOMHelpers.normalizeURL(url);
-                console.log(`YamiDataExtractor.getImages - Normalized image ${index}:`, normalized);
                 images.add(normalized);
-                console.log(`YamiDataExtractor.getImages - Current images.size:`, images.size);
-              } else {
-                console.log(`YamiDataExtractor.getImages - Skipped image ${index} (logo/placeholder)`);
               }
             });
 
@@ -247,33 +237,25 @@ class YamiDataExtractor {
             // If we only got 3 or fewer images, they're likely just variations, so continue to DOM extraction
             // to get all actual product images from the gallery
             if (images.size > 3) {
-              const result = Array.from(images).slice(0, 10);
-              console.log('YamiDataExtractor.getImages - Returning images from JSON-LD:', result);
-              return result;
+              return Array.from(images).slice(0, 10);
             } else {
-              console.log('YamiDataExtractor.getImages - Only got aspect ratio variations, continuing to DOM extraction');
               images.clear(); // Clear the aspect ratio variations
             }
           }
         } catch (e) {
           // Continue to next strategy if JSON parsing fails
-          console.error('YamiDataExtractor.getImages - Error parsing JSON-LD:', e);
         }
         break; // Only check first Product schema
       }
     }
 
     // Strategy 2: Product image gallery - div[data-observetrack="goods_image"] .item-preview__list li img
-    console.log('YamiDataExtractor.getImages - Strategy 2: Looking for gallery');
     const itemPreviewList = document.querySelector('[data-observetrack="goods_image"] .item-preview__list');
-    console.log('YamiDataExtractor.getImages - Found itemPreviewList?', !!itemPreviewList);
     if (itemPreviewList) {
       const listItems = itemPreviewList.querySelectorAll('li');
-      console.log('YamiDataExtractor.getImages - Number of li items:', listItems.length);
       listItems.forEach((li, liIndex) => {
         // Try to find all images within this li
         const imgs = li.querySelectorAll('img');
-        console.log(`YamiDataExtractor.getImages - Li ${liIndex}: found ${imgs.length} img tags`);
         imgs.forEach((img, imgIndex) => {
           // Try multiple attribute names for image sources
           // Prioritize data-src over src because lazy-loaded images have lazy.svg in src
@@ -285,35 +267,23 @@ class YamiDataExtractor {
                     img.dataset?.original ||
                     img.getAttribute('src');
 
-          console.log(`YamiDataExtractor.getImages - Li ${liIndex} Img ${imgIndex}: src="${src}"`);
-
           if (src && !src.includes('lazy.svg') && !src.includes('placeholder') &&
               !src.includes('data:image') && !src.includes('logo')) {
             const normalized = YamiDOMHelpers.normalizeURL(src);
             const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
-            console.log(`YamiDataExtractor.getImages - Adding: ${highRes}`);
             images.add(highRes);
-            console.log(`YamiDataExtractor.getImages - Current images.size: ${images.size}`);
-          } else {
-            console.log(`YamiDataExtractor.getImages - Skipped: ${src?.substring(0, 50)}`);
           }
         });
       });
-      console.log(`YamiDataExtractor.getImages - After Strategy 2, images.size: ${images.size}`);
     }
 
     // Strategy 3: Fallback - .item-preview__wrapper .item-preview__list li img
-    console.log('YamiDataExtractor.getImages - Strategy 3: Checking if needed (images.size === 0)');
     if (images.size === 0) {
-      console.log('YamiDataExtractor.getImages - Strategy 3: Looking for .item-preview__wrapper .item-preview__list');
       const previewList = document.querySelector('.item-preview__wrapper .item-preview__list');
-      console.log('YamiDataExtractor.getImages - Found previewList?', !!previewList);
       if (previewList) {
         const listItems = previewList.querySelectorAll('li');
-        console.log('YamiDataExtractor.getImages - Strategy 3: Number of li items:', listItems.length);
         listItems.forEach((li, liIndex) => {
           const imgs = li.querySelectorAll('img');
-          console.log(`YamiDataExtractor.getImages - Strategy 3 Li ${liIndex}: found ${imgs.length} img tags`);
           imgs.forEach((img, imgIndex) => {
             // Prioritize data-src over src because lazy-loaded images have lazy.svg in src
             const src = img.getAttribute('data-src') ||
@@ -324,13 +294,10 @@ class YamiDataExtractor {
                        img.dataset?.original ||
                        img.getAttribute('src');
 
-            console.log(`YamiDataExtractor.getImages - Strategy 3 Li ${liIndex} Img ${imgIndex}: src="${src}"`);
-
             if (src && !src.includes('lazy.svg') && !src.includes('placeholder') &&
                 !src.includes('data:image') && !src.includes('logo')) {
               const normalized = YamiDOMHelpers.normalizeURL(src);
               const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
-              console.log(`YamiDataExtractor.getImages - Strategy 3 Adding: ${highRes}`);
               images.add(highRes);
             }
           });
@@ -374,10 +341,7 @@ class YamiDataExtractor {
     }
 
     // Convert Set to Array and limit to 10 images
-    const finalImages = Array.from(images).filter(url => url && url.length > 0).slice(0, 10);
-    console.log('YamiDataExtractor.getImages - FINAL RESULT: Returning', finalImages.length, 'images');
-    console.log('YamiDataExtractor.getImages - URLs:', finalImages);
-    return finalImages;
+    return Array.from(images).filter(url => url && url.length > 0).slice(0, 10);
   }
 
   /**
@@ -717,57 +681,40 @@ class YamiDataExtractor {
       if (content.includes('"@type":"Product"') || content.includes('"@type": "Product"')) {
         try {
           const jsonld = JSON.parse(content);
-          console.log('YamiDataExtractor.extractImagesFromDoc - Found JSON-LD Product schema');
-          console.log('YamiDataExtractor.extractImagesFromDoc - jsonld.image:', jsonld.image);
-          console.log('YamiDataExtractor.extractImagesFromDoc - Is array?', Array.isArray(jsonld.image));
 
           // Handle both array and single string for image field
           if (jsonld.image) {
             const imageUrls = Array.isArray(jsonld.image) ? jsonld.image : [jsonld.image];
-            console.log('YamiDataExtractor.extractImagesFromDoc - imageUrls to process:', imageUrls);
 
             imageUrls.forEach((url, index) => {
-              console.log(`YamiDataExtractor.extractImagesFromDoc - Processing image ${index}:`, url);
               if (url && !url.includes('logo') && !url.includes('placeholder')) {
                 // JSON-LD images are already in good quality, just normalize the URL
                 const normalized = YamiDOMHelpers.normalizeURL(url);
-                console.log(`YamiDataExtractor.extractImagesFromDoc - Normalized image ${index}:`, normalized);
                 images.add(normalized);
-                console.log(`YamiDataExtractor.extractImagesFromDoc - Current images.size:`, images.size);
-              } else {
-                console.log(`YamiDataExtractor.extractImagesFromDoc - Skipped image ${index} (logo/placeholder)`);
               }
             });
 
             // JSON-LD often only contains aspect ratio variations of the main image (e.g., 640x640, 640x480, 640x360)
             // If we only got 3 or fewer images, they're likely just variations, so continue to DOM extraction
             if (images.size > 3) {
-              const result = Array.from(images);
-              console.log('YamiDataExtractor.extractImagesFromDoc - Returning images from JSON-LD:', result);
-              return result;
+              return Array.from(images);
             } else {
-              console.log('YamiDataExtractor.extractImagesFromDoc - Only got aspect ratio variations, continuing to DOM extraction');
               images.clear(); // Clear the aspect ratio variations
             }
           }
         } catch (e) {
           // Continue to next strategy if JSON parsing fails
-          console.error('YamiDataExtractor.extractImagesFromDoc - Error parsing JSON-LD:', e);
         }
         break; // Only check first Product schema
       }
     }
 
     // Strategy 2: Product image gallery - div[data-observetrack="goods_image"] .item-preview__list li img
-    console.log('YamiDataExtractor.extractImagesFromDoc - Strategy 2: Looking for gallery');
     const itemPreviewList = doc.querySelector('[data-observetrack="goods_image"] .item-preview__list');
-    console.log('YamiDataExtractor.extractImagesFromDoc - Found itemPreviewList?', !!itemPreviewList);
     if (itemPreviewList) {
       const listItems = itemPreviewList.querySelectorAll('li');
-      console.log('YamiDataExtractor.extractImagesFromDoc - Number of li items:', listItems.length);
       listItems.forEach((li, liIndex) => {
         const imgs = li.querySelectorAll('img');
-        console.log(`YamiDataExtractor.extractImagesFromDoc - Li ${liIndex}: found ${imgs.length} img tags`);
         imgs.forEach((img, imgIndex) => {
           // Prioritize data-src over src because lazy-loaded images have lazy.svg in src
           const src = img.getAttribute('data-src') ||
@@ -778,21 +725,14 @@ class YamiDataExtractor {
                      img.dataset?.original ||
                      img.getAttribute('src');
 
-          console.log(`YamiDataExtractor.extractImagesFromDoc - Li ${liIndex} Img ${imgIndex}: src="${src}"`);
-
           if (src && !src.includes('lazy.svg') && !src.includes('placeholder') &&
               !src.includes('data:image') && !src.includes('logo')) {
             const normalized = YamiDOMHelpers.normalizeURL(src);
             const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
-            console.log(`YamiDataExtractor.extractImagesFromDoc - Adding: ${highRes}`);
             images.add(highRes);
-            console.log(`YamiDataExtractor.extractImagesFromDoc - Current images.size: ${images.size}`);
-          } else {
-            console.log(`YamiDataExtractor.extractImagesFromDoc - Skipped: ${src?.substring(0, 50)}`);
           }
         });
       });
-      console.log(`YamiDataExtractor.extractImagesFromDoc - After Strategy 2, images.size: ${images.size}`);
     }
 
     // Strategy 3: Fallback - .item-preview__wrapper .item-preview__list li img
@@ -845,10 +785,7 @@ class YamiDataExtractor {
       }
     }
 
-    const finalImages = Array.from(images).filter(url => url && url.length > 0).slice(0, 10);
-    console.log('YamiDataExtractor.extractImagesFromDoc - FINAL RESULT: Returning', finalImages.length, 'images');
-    console.log('YamiDataExtractor.extractImagesFromDoc - URLs:', finalImages);
-    return finalImages;
+    return Array.from(images).filter(url => url && url.length > 0).slice(0, 10);
   }
 
   static extractDescriptionFromDoc(doc) {

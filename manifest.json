@@ -6,7 +6,8 @@
   "permissions": [
     "activeTab",
     "downloads",
-    "storage"
+    "storage",
+    "tabs"
   ],
   "host_permissions": [
     "https://www.amazon.com/*",
@@ -18,6 +19,9 @@
     "https://www.ebay.co.uk/*",
     "https://www.ebay.ca/*"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
