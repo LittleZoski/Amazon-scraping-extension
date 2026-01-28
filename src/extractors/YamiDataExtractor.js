@@ -19,7 +19,7 @@ class YamiDataExtractor {
       asin: productID, // Use "asin" for eBay backend compatibility (same as Amazon)
       title: this.getTitle(),
       price: this.getPrice(),
-      deliveryFee: '$4.99', // Always set to 4.99 for Yami products
+      deliveryFee: '$5.99', // Always set to 5.99 for Yami products
       images: this.getImages(),
       description: this.getDescription(),
       bulletPoints: this.getBulletPoints(),
@@ -1040,7 +1040,7 @@ class YamiDataExtractor {
       scrapedAt: new Date().toISOString(),
       title: this.extractTitleFromDoc(doc),
       price: this.extractPriceFromDoc(doc),
-      deliveryFee: '$4.99', // Always set to 4.99 for Yami products
+      deliveryFee: '$5.99', // Always set to 5.99 for Yami products
       images: this.extractImagesFromDoc(doc),
       description: this.extractDescriptionFromDoc(doc),
       bulletPoints: this.extractBulletPointsFromDoc(doc),

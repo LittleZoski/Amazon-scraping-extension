@@ -15,7 +15,12 @@ class YamiDOMHelpers {
       url.includes('/search?') ||      // Search results
       url.includes('/category/') ||    // Alternative category format
       url.includes('/collection/') ||  // Collection pages
-      url.includes('/brand/')          // Brand pages
+      url.includes('/brand/') ||       // Brand pages
+      url.includes('/new-arrivals?') || // New arrivals pages
+      url.includes('/best-sellers?') || // Best sellers pages
+      url.includes('/deals?') ||        // Deals pages
+      url.includes('/clearance?') ||    // Clearance pages
+      (url.includes('?page=') && !url.includes('/p/')) // Any paginated listing that's not a product page
     );
   }
 

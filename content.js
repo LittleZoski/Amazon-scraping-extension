@@ -2215,6 +2215,877 @@ class AddressImporter {
 
 
 // ========================================
+// ADDRESSDELETER MODULE
+// ========================================
+
+/**
+ * Address Deleter
+ * Handles bulk deletion of Amazon addresses
+ */
+
+class AddressDeleter {
+  constructor() {
+    this.deleteButton = null;
+    this.isDeleting = false;
+  }
+
+  init() {
+    if (DOMHelpers.isAddressPage() && !DOMHelpers.isAddAddressPage()) {
+      // Check if we have a pending deletion session to continue
+      this.checkAndContinueDeletion();
+      this.injectDeleteButton();
+    }
+  }
+
+  checkAndContinueDeletion() {
+    const deletionSession = sessionStorage.getItem('addressDeletionSession');
+    if (!deletionSession) return;
+
+    const session = JSON.parse(deletionSession);
+    const { addressNames, currentIndex, successCount, failCount } = session;
+
+    // If we've processed all addresses, clean up
+    if (currentIndex >= addressNames.length) {
+      sessionStorage.removeItem('addressDeletionSession');
+      UIManager.showNotification(`✅ Deleted ${successCount} address(es). ${failCount > 0 ? `${failCount} failed.` : ''}`, 'success');
+      return;
+    }
+
+    // Continue deletion after a short delay to let the page stabilize
+    setTimeout(() => {
+      this.continueDeleting();
+    }, 1500);
+  }
+
+  async continueDeleting() {
+    const deletionSession = sessionStorage.getItem('addressDeletionSession');
+    if (!deletionSession) return;
+
+    const session = JSON.parse(deletionSession);
+    let { addressNames, currentIndex, successCount, failCount } = session;
+    const total = addressNames.length;
+
+    // Show progress notification
+    UIManager.showNotification(`Deleting address ${currentIndex + 1} of ${total}...`, 'info');
+
+    // Get the current address name to delete
+    const addressName = addressNames[currentIndex];
+
+    // Check if this address still exists on the page
+    const addressExists = this.checkAddressExists(addressName);
+
+    let success = false;
+    if (addressExists) {
+      // Try to delete this address
+      success = await this.deleteSingleAddress(addressName);
+    } else {
+      // Address doesn't exist - maybe it was already deleted or name mismatch
+      // Count as success (already gone) and move on
+      success = true;
+    }
+
+    if (success) {
+      successCount++;
+    } else {
+      failCount++;
+    }
+
+    // Update session for next iteration
+    currentIndex++;
+    session.currentIndex = currentIndex;
+    session.successCount = successCount;
+    session.failCount = failCount;
+    sessionStorage.setItem('addressDeletionSession', JSON.stringify(session));
+
+    if (currentIndex >= addressNames.length) {
+      // All done
+      sessionStorage.removeItem('addressDeletionSession');
+      UIManager.showNotification(`✅ Deleted ${successCount} address(es). ${failCount > 0 ? `${failCount} failed.` : ''}`, 'success');
+    } else {
+      // If page didn't reload (deletion failed or address not found), manually continue
+      // Wait a moment then check if we need to continue
+      await DOMHelpers.sleep(2000);
+
+      // Check if we're still on the same page (no reload happened)
+      const currentSession = sessionStorage.getItem('addressDeletionSession');
+      if (currentSession) {
+        const currentSessionData = JSON.parse(currentSession);
+        // If currentIndex matches, page didn't reload, so continue manually
+        if (currentSessionData.currentIndex === currentIndex) {
+          this.continueDeleting();
+        }
+      }
+    }
+  }
+
+  checkAddressExists(addressName) {
+    const addressBlocks = document.querySelectorAll('div[id^="ya-myab-display-address-block-"]');
+    for (const block of addressBlocks) {
+      const nameElement = block.querySelector('.id-addr-ux-search-text.a-text-bold');
+      if (nameElement && nameElement.textContent.trim() === addressName) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async deleteSingleAddress(addressName) {
+    // First, close any open modals/popovers that might be lingering
+    this.closeAnyOpenModals();
+    await DOMHelpers.sleep(300);
+
+    // Find the address by name
+    const addressBlocks = document.querySelectorAll('div[id^="ya-myab-display-address-block-"]');
+    let removeLink = null;
+
+    for (const block of addressBlocks) {
+      const nameElement = block.querySelector('.id-addr-ux-search-text.a-text-bold');
+      if (nameElement && nameElement.textContent.trim() === addressName) {
+        // Find delete link in the edit row
+        const blockIndex = block.id.replace('ya-myab-display-address-block-', '');
+        const editRow = document.querySelector(`#ya-myab-edit-address-desktop-row-${blockIndex}`);
+        if (editRow) {
+          removeLink = editRow.querySelector('a.delete-link[id^="ya-myab-address-delete-btn-"]');
+        }
+        if (removeLink) break;
+
+        // Fallback: search in parent column
+        const parentColumn = block.closest('.address-column');
+        if (parentColumn) {
+          removeLink = parentColumn.querySelector('a.delete-link[id^="ya-myab-address-delete-btn-"]');
+        }
+        if (removeLink) break;
+      }
+    }
+
+    if (!removeLink) {
+      return false;
+    }
+
+    // Click remove link
+    removeLink.click();
+    await DOMHelpers.sleep(1000);
+
+    // Click confirm button
+    const confirmed = await this.clickConfirmButton();
+
+    // If confirmation failed, try to close the modal and return false
+    if (!confirmed) {
+      this.closeAnyOpenModals();
+    }
+
+    return confirmed;
+  }
+
+  closeAnyOpenModals() {
+    // Try to close any open popovers/modals
+    const closeSelectors = [
+      '.a-popover-wrapper .a-button-close',
+      '.a-popover-close',
+      '.a-modal-close',
+      'button[data-action="a-popover-close"]',
+    ];
+
+    for (const selector of closeSelectors) {
+      const closeBtn = document.querySelector(selector);
+      if (closeBtn) {
+        closeBtn.click();
+        return;
+      }
+    }
+
+    // Click outside to close modal
+    const backdrop = document.querySelector('.a-popover-backdrop');
+    if (backdrop) {
+      backdrop.click();
+    }
+  }
+
+  async clickConfirmButton() {
+    // Wait for modal to fully appear
+    await DOMHelpers.sleep(700);
+
+    // Try to find the Yes/Confirm button using various selectors
+    // Based on Amazon's modal pattern: deleteAddressModal-X has buttons
+    const selectors = [
+      // Specific Yes button patterns
+      'input[id*="deleteAddressModal"][id*="yes"]',
+      'button[id*="deleteAddressModal"][id*="yes"]',
+      'span[id*="deleteAddressModal"][id*="yes"]',
+      // Primary button in popover (Yes is usually primary/span12)
+      '.a-popover-wrapper .a-button-span12 input',
+      '.a-popover-wrapper .a-button-span12 button',
+      '.a-popover-wrapper .a-button-primary input',
+      '.a-popover-wrapper .a-button-primary button',
+      // Generic modal buttons
+      '.a-modal-scroller .a-button-primary input',
+      '.a-modal-scroller .a-button-span12 input',
+      // Any visible input in a button that's not cancel
+      '.a-popover-wrapper .a-button:not(.a-button-base) input[type="submit"]',
+    ];
+
+    for (const selector of selectors) {
+      const btn = document.querySelector(selector);
+      if (btn) {
+        console.log('Found Yes button with selector:', selector);
+        btn.click();
+        await DOMHelpers.sleep(300);
+        return true;
+      }
+    }
+
+    // Fallback: Look for any visible popover and find buttons
+    const popovers = document.querySelectorAll('.a-popover-wrapper');
+    for (const popover of popovers) {
+      const style = window.getComputedStyle(popover);
+      const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && popover.offsetParent !== null;
+
+      if (isVisible) {
+        // Find all buttons in the popover
+        const allButtons = popover.querySelectorAll('.a-button input, .a-button button');
+
+        for (const btn of allButtons) {
+          const buttonContainer = btn.closest('.a-button');
+          const buttonText = buttonContainer?.textContent?.toLowerCase() || '';
+
+          // Skip if it's the Cancel button
+          if (buttonText.includes('cancel') || buttonContainer?.id?.includes('cancel')) {
+            continue;
+          }
+
+          // Click if it's Yes or a primary/span12 button
+          if (buttonText.includes('yes') ||
+              buttonContainer?.classList.contains('a-button-primary') ||
+              buttonContainer?.classList.contains('a-button-span12')) {
+            console.log('Clicking button:', buttonText, btn);
+            btn.click();
+            await DOMHelpers.sleep(300);
+            return true;
+          }
+        }
+
+        // Last resort: click first non-cancel button
+        for (const btn of allButtons) {
+          const buttonContainer = btn.closest('.a-button');
+          if (!buttonContainer?.id?.includes('cancel')) {
+            console.log('Clicking first non-cancel button:', btn);
+            btn.click();
+            await DOMHelpers.sleep(300);
+            return true;
+          }
+        }
+      }
+    }
+
+    console.log('Could not find Yes button');
+    return false;
+  }
+
+  injectDeleteButton() {
+    if (document.getElementById('address-bulk-delete-btn')) return;
+
+    this.deleteButton = document.createElement('button');
+    this.deleteButton.id = 'address-bulk-delete-btn';
+    this.deleteButton.innerHTML = '🗑️ Delete Existing Addresses';
+    this.deleteButton.style.cssText = `
+      position: fixed;
+      top: 150px;
+      right: 20px;
+      z-index: 10000;
+      padding: 12px 20px;
+      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+      transition: all 0.3s ease;
+    `;
+
+    this.deleteButton.addEventListener('mouseenter', () => {
+      this.deleteButton.style.transform = 'scale(1.05)';
+      this.deleteButton.style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.3)';
+    });
+
+    this.deleteButton.addEventListener('mouseleave', () => {
+      this.deleteButton.style.transform = 'scale(1)';
+      this.deleteButton.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.2)';
+    });
+
+    this.deleteButton.addEventListener('click', () => this.showDeleteModal());
+    document.body.appendChild(this.deleteButton);
+  }
+
+  extractAddressesFromPage() {
+    const addresses = [];
+
+    // Find all address cards - they are div elements with class "a-row a-spacing-micro"
+    // But we need to be more specific - look for the address block containers
+    const addressBlocks = document.querySelectorAll('div[id^="ya-myab-display-address-block-"]');
+
+    addressBlocks.forEach((block, index) => {
+      // Find the name field with class "id-addr-ux-search-text a-text-bold"
+      const nameElement = block.querySelector('.id-addr-ux-search-text.a-text-bold');
+
+      // Find all list items for address details
+      const listItems = block.querySelectorAll('ul.a-unordered-list.a-nostyle.a-vertical li span.a-list-item');
+
+      // Find the remove link
+      const removeLink = block.closest('.address-column')?.querySelector('a.delete-link[id^="ya-myab-address-delete-btn-"]');
+
+      if (nameElement) {
+        const name = nameElement.textContent.trim();
+        const addressLines = [];
+
+        listItems.forEach(item => {
+          const text = item.textContent.trim();
+          if (text && text !== name) {
+            addressLines.push(text);
+          }
+        });
+
+        addresses.push({
+          index: index,
+          name: name,
+          addressLines: addressLines,
+          displayText: addressLines.join(', '),
+          blockElement: block,
+          removeLink: removeLink
+        });
+      }
+    });
+
+    return addresses;
+  }
+
+  showDeleteModal() {
+    const addresses = this.extractAddressesFromPage();
+
+    if (addresses.length === 0) {
+      UIManager.showNotification('No addresses found on this page.', 'warning');
+      return;
+    }
+
+    const modal = document.createElement('div');
+    modal.id = 'address-delete-modal';
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 10003;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+
+    modal.innerHTML = `
+      <div style="background: white; border-radius: 16px; padding: 30px; max-width: 550px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+        <h2 style="margin: 0 0 20px 0; color: #333; font-size: 24px;">🗑️ Delete Existing Addresses</h2>
+
+        <div style="margin-bottom: 20px; padding: 15px; background: #fef2f2; border-radius: 8px; border-left: 4px solid #ef4444;">
+          <p style="margin: 0; font-size: 13px; color: #991b1b; line-height: 1.5;">
+            <strong>Warning:</strong> This will permanently delete the selected addresses from your Amazon account.
+            This action cannot be undone.
+          </p>
+        </div>
+
+        <div style="margin-bottom: 15px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h3 style="margin: 0; font-size: 14px; color: #666;">Select Addresses to Delete:</h3>
+            <div style="display: flex; gap: 10px;">
+              <button id="select-all-delete-btn" style="padding: 4px 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500;">Select All</button>
+              <button id="deselect-all-delete-btn" style="padding: 4px 10px; background: #6b7280; color: white; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500;">Deselect All</button>
+            </div>
+          </div>
+          <div id="address-delete-list" style="font-size: 12px; color: #333; max-height: 300px; overflow-y: auto; background: #f9fafb; padding: 15px; border-radius: 8px;">
+            ${addresses.map((addr, i) => `
+              <label style="display: flex; align-items: flex-start; padding: 10px; margin-bottom: 8px; background: white; border-radius: 6px; cursor: pointer; transition: background 0.2s; border: 1px solid #e5e7eb;"
+                     onmouseover="this.style.background='#fef2f2'; this.style.borderColor='#fecaca'"
+                     onmouseout="this.style.background='white'; this.style.borderColor='#e5e7eb'">
+                <input type="checkbox" class="address-delete-checkbox" data-index="${i}"
+                       style="margin-right: 12px; margin-top: 3px; width: 18px; height: 18px; cursor: pointer; accent-color: #ef4444;">
+                <span style="flex: 1;">
+                  <strong style="color: #111; font-size: 14px;">${addr.name}</strong><br>
+                  <span style="color: #666; font-size: 12px; line-height: 1.4;">${addr.displayText || 'No address details'}</span>
+                </span>
+              </label>
+            `).join('')}
+          </div>
+          <div id="delete-selection-count" style="margin-top: 10px; font-size: 12px; color: #666; font-weight: 500;">0 of ${addresses.length} addresses selected</div>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 25px;">
+          <button id="start-delete-btn" disabled style="flex: 1; padding: 12px; background: #d1d5db; color: #6b7280; border: none; border-radius: 8px; font-weight: 600; cursor: not-allowed; font-size: 15px;">
+            🗑️ Delete Selected
+          </button>
+          <button id="cancel-delete-btn" style="flex: 1; padding: 12px; background: #e0e0e0; color: #666; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 15px;">
+            Cancel
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const addressList = modal.querySelector('#address-delete-list');
+    const startBtn = modal.querySelector('#start-delete-btn');
+    const cancelBtn = modal.querySelector('#cancel-delete-btn');
+    const selectAllBtn = modal.querySelector('#select-all-delete-btn');
+    const deselectAllBtn = modal.querySelector('#deselect-all-delete-btn');
+    const selectionCount = modal.querySelector('#delete-selection-count');
+
+    const updateSelectionCount = () => {
+      const checkedCount = addressList.querySelectorAll('input[type="checkbox"]:checked').length;
+      selectionCount.textContent = `${checkedCount} of ${addresses.length} addresses selected`;
+
+      if (checkedCount > 0) {
+        startBtn.disabled = false;
+        startBtn.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+        startBtn.style.color = 'white';
+        startBtn.style.cursor = 'pointer';
+      } else {
+        startBtn.disabled = true;
+        startBtn.style.background = '#d1d5db';
+        startBtn.style.color = '#6b7280';
+        startBtn.style.cursor = 'not-allowed';
+      }
+    };
+
+    // Add event listeners to checkboxes
+    addressList.querySelectorAll('.address-delete-checkbox').forEach(checkbox => {
+      checkbox.addEventListener('change', updateSelectionCount);
+    });
+
+    selectAllBtn.addEventListener('click', () => {
+      addressList.querySelectorAll('.address-delete-checkbox').forEach(checkbox => {
+        checkbox.checked = true;
+      });
+      updateSelectionCount();
+    });
+
+    deselectAllBtn.addEventListener('click', () => {
+      addressList.querySelectorAll('.address-delete-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+      });
+      updateSelectionCount();
+    });
+
+    startBtn.addEventListener('click', () => {
+      const selectedIndices = Array.from(addressList.querySelectorAll('.address-delete-checkbox:checked'))
+        .map(checkbox => parseInt(checkbox.dataset.index));
+
+      if (selectedIndices.length === 0) {
+        UIManager.showNotification('Please select at least one address to delete.', 'warning');
+        return;
+      }
+
+      const selectedAddresses = selectedIndices.map(i => addresses[i]);
+      modal.remove();
+      this.startBulkDelete(selectedAddresses);
+    });
+
+    cancelBtn.addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.remove();
+    });
+  }
+
+  async startBulkDelete(addressesToDelete) {
+    // Use sessionStorage-based approach to survive page reloads
+    const addressNames = addressesToDelete.map(a => a.name);
+
+    // Store deletion session
+    const session = {
+      addressNames: addressNames,
+      currentIndex: 0,
+      successCount: 0,
+      failCount: 0
+    };
+
+    sessionStorage.setItem('addressDeletionSession', JSON.stringify(session));
+
+    UIManager.showNotification(`Starting deletion of ${addressNames.length} addresses...`, 'info');
+
+    // Start the first deletion
+    await this.continueDeleting();
+  }
+
+  // Keep old methods for reference but they won't be used
+  async _oldStartBulkDelete(addressesToDelete) {
+    if (this.isDeleting) {
+      UIManager.showNotification('Deletion already in progress.', 'warning');
+      return;
+    }
+
+    this.isDeleting = true;
+    const total = addressesToDelete.length;
+    let successCount = 0;
+    let failCount = 0;
+
+    // Create progress UI
+    const progressUI = this.createDeleteProgressUI(total);
+    document.body.appendChild(progressUI);
+
+    let shouldStop = false;
+    const stopBtn = progressUI.querySelector('#stop-delete-btn');
+    stopBtn.addEventListener('click', () => {
+      shouldStop = true;
+      stopBtn.textContent = '⏳ Stopping...';
+      stopBtn.disabled = true;
+    });
+
+    for (let i = 0; i < addressesToDelete.length; i++) {
+      if (shouldStop) {
+        UIManager.showNotification(`Deletion stopped. ${successCount} deleted, ${failCount} failed.`, 'warning');
+        break;
+      }
+
+      const address = addressesToDelete[i];
+      this.updateDeleteProgress(progressUI, i + 1, total, successCount, failCount, address.name);
+
+      try {
+        // Re-find the remove link since DOM may have changed after deletions
+        const success = await this.deleteAddress(address, i);
+
+        if (success) {
+          successCount++;
+        } else {
+          failCount++;
+        }
+
+        // Update progress after each deletion
+        this.updateDeleteProgress(progressUI, i + 1, total, successCount, failCount, address.name);
+
+      } catch (error) {
+        console.error('Error deleting address:', error);
+        failCount++;
+        this.updateDeleteProgress(progressUI, i + 1, total, successCount, failCount, address.name);
+      }
+
+      console.log(`After iteration ${i + 1}: success=${successCount}, fail=${failCount}`);
+
+      // Small delay between deletions for safety
+      if (i < addressesToDelete.length - 1 && !shouldStop) {
+        console.log('Waiting 500ms before next deletion...');
+        await DOMHelpers.sleep(500);
+      }
+    }
+
+    console.log('=== BULK DELETE COMPLETE ===');
+    console.log(`Final: success=${successCount}, fail=${failCount}`);
+
+    progressUI.remove();
+    this.isDeleting = false;
+
+    if (successCount > 0) {
+      UIManager.showNotification(`✅ Deleted ${successCount} address(es). ${failCount > 0 ? `${failCount} failed.` : ''}`, 'success');
+      // Only reload if there are remaining addresses, otherwise just notify
+      const remainingAddresses = document.querySelectorAll('div[id^="ya-myab-display-address-block-"]').length;
+      if (remainingAddresses > 0 || failCount > 0) {
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+      }
+    } else {
+      UIManager.showNotification(`❌ Failed to delete addresses. Please try again.`, 'error');
+    }
+  }
+
+  async deleteAddress(address, originalIndex) {
+    // Always re-scan the page to find the address by name since DOM changes after each deletion
+    let removeLink = null;
+
+    // Find by name match - this is more reliable since indices change after deletions
+    const addressBlocks = document.querySelectorAll('div[id^="ya-myab-display-address-block-"]');
+    for (const block of addressBlocks) {
+      const nameElement = block.querySelector('.id-addr-ux-search-text.a-text-bold');
+      if (nameElement && nameElement.textContent.trim() === address.name) {
+        // Find the parent column that contains the delete link
+        const parentColumn = block.closest('.address-column');
+        if (parentColumn) {
+          removeLink = parentColumn.querySelector('a.delete-link[id^="ya-myab-address-delete-btn-"]');
+          if (removeLink) break;
+        }
+
+        // Alternative: look for delete link in sibling elements or parent row
+        const parentRow = block.closest('.a-row');
+        if (parentRow) {
+          removeLink = parentRow.querySelector('a.delete-link[id^="ya-myab-address-delete-btn-"]');
+          if (removeLink) break;
+        }
+
+        // Try looking in the edit row below the display block
+        const editRow = document.querySelector(`#ya-myab-edit-address-desktop-row-${block.id.replace('ya-myab-display-address-block-', '')}`);
+        if (editRow) {
+          removeLink = editRow.querySelector('a.delete-link[id^="ya-myab-address-delete-btn-"]');
+          if (removeLink) break;
+        }
+      }
+    }
+
+    // Fallback: if we still don't have a link, search more broadly
+    if (!removeLink) {
+      // Look through all delete links and find one whose parent contains the name
+      const allDeleteLinks = document.querySelectorAll('a.delete-link[id^="ya-myab-address-delete-btn-"]');
+      for (const link of allDeleteLinks) {
+        const parentColumn = link.closest('.address-column');
+        if (parentColumn) {
+          const nameElement = parentColumn.querySelector('.id-addr-ux-search-text.a-text-bold');
+          if (nameElement && nameElement.textContent.trim() === address.name) {
+            removeLink = link;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!removeLink) {
+      console.error('Could not find remove link for address:', address.name);
+      return false;
+    }
+
+    console.log('Found remove link for:', address.name, removeLink.id);
+
+    // Click the remove link to trigger the modal
+    removeLink.click();
+
+    // Wait for the confirmation modal to appear
+    await DOMHelpers.sleep(800);
+
+    // Find and click the confirm button in the modal
+    const confirmed = await this.confirmDeletion(removeLink.id);
+
+    // Wait for the deletion to fully complete and DOM to update
+    if (confirmed) {
+      // Wait for the address to be removed from the DOM
+      const removed = await this.waitForDOMToStabilize(address.name);
+      if (!removed) {
+        console.log('Warning: Address may not have been removed properly');
+      }
+    }
+
+    return confirmed;
+  }
+
+  async confirmDeletion(deleteBtnId) {
+    // The modal ID is based on the delete button ID
+    // e.g., ya-myab-address-delete-btn-0 -> deleteAddressModal-0
+    const modalIndex = deleteBtnId.replace('ya-myab-address-delete-btn-', '');
+
+    // Wait for modal to fully load
+    await DOMHelpers.sleep(500);
+
+    // Try multiple selectors to find the confirm button
+    const confirmSelectors = [
+      // Primary selector based on modal naming convention
+      `#deleteAddressModal-${modalIndex}-confirm-btn`,
+      `#a-popover-deleteAddressModal-${modalIndex} .a-button-primary input`,
+      `#a-popover-deleteAddressModal-${modalIndex} .a-button-primary button`,
+      // Generic selectors for visible popover confirmation buttons
+      '.a-popover-modal .a-button-primary input',
+      '.a-popover-modal .a-button-primary button',
+      '.a-popover-wrapper:not([style*="display: none"]) .a-button-primary input',
+      '.a-popover-wrapper:not([style*="display: none"]) .a-button-primary button',
+    ];
+
+    // First try specific selectors
+    for (const selector of confirmSelectors) {
+      const element = document.querySelector(selector);
+      if (element) {
+        console.log('Found confirm button with selector:', selector);
+        element.click();
+
+        // Wait for modal to close and deletion to complete
+        await this.waitForModalToClose();
+        return true;
+      }
+    }
+
+    // Fallback: Look for any visible popover with a primary button containing "Yes"
+    const popovers = document.querySelectorAll('.a-popover-wrapper');
+    for (const popover of popovers) {
+      // Check if popover is visible
+      const style = window.getComputedStyle(popover);
+      if (style.display !== 'none' && style.visibility !== 'hidden') {
+        // Look for button with "Yes" text
+        const buttons = popover.querySelectorAll('.a-button-primary input, .a-button-primary button, .a-button-primary .a-button-input');
+        for (const btn of buttons) {
+          const buttonText = btn.closest('.a-button')?.textContent?.toLowerCase() || '';
+          if (buttonText.includes('yes') || buttonText.includes('confirm') || buttonText.includes('delete')) {
+            console.log('Clicking confirm button in popover:', btn);
+            btn.click();
+            await this.waitForModalToClose();
+            return true;
+          }
+        }
+
+        // If no specific text found, just click the primary button
+        const primaryBtn = popover.querySelector('.a-button-primary input, .a-button-primary .a-button-input');
+        if (primaryBtn) {
+          console.log('Clicking primary button in popover (fallback):', primaryBtn);
+          primaryBtn.click();
+          await this.waitForModalToClose();
+          return true;
+        }
+      }
+    }
+
+    console.error('Could not find confirmation button for modal:', modalIndex);
+
+    // Try to close any open modal to prevent blocking
+    const closeBtn = document.querySelector('.a-popover-wrapper .a-button-close, .a-popover-close');
+    if (closeBtn) {
+      closeBtn.click();
+      await DOMHelpers.sleep(500);
+    }
+
+    return false;
+  }
+
+  async waitForModalToClose() {
+    // Wait for the modal/popover to close (max 3 seconds)
+    const maxWait = 3000;
+    const checkInterval = 200;
+    let waited = 0;
+
+    while (waited < maxWait) {
+      await DOMHelpers.sleep(checkInterval);
+      waited += checkInterval;
+
+      // Check if any visible popovers exist
+      const visiblePopovers = document.querySelectorAll('.a-popover-wrapper');
+      let hasVisiblePopover = false;
+
+      for (const popover of visiblePopovers) {
+        const style = window.getComputedStyle(popover);
+        if (style.display !== 'none' && style.visibility !== 'hidden' && popover.offsetParent !== null) {
+          hasVisiblePopover = true;
+          break;
+        }
+      }
+
+      if (!hasVisiblePopover) {
+        console.log('Modal closed after', waited, 'ms');
+        return true;
+      }
+    }
+
+    console.log('Modal did not close within timeout, continuing anyway');
+    return false;
+  }
+
+  async waitForDOMToStabilize(addressNameToBeRemoved) {
+    // Wait for the DOM to stabilize after a deletion
+    // Check that the address with the given name is no longer present
+    const maxWait = 5000;
+    const checkInterval = 300;
+    let waited = 0;
+
+    console.log('Waiting for DOM to stabilize after removing:', addressNameToBeRemoved);
+
+    while (waited < maxWait) {
+      await DOMHelpers.sleep(checkInterval);
+      waited += checkInterval;
+
+      // Check if the address is still present
+      let addressStillExists = false;
+      const addressBlocks = document.querySelectorAll('div[id^="ya-myab-display-address-block-"]');
+
+      for (const block of addressBlocks) {
+        const nameElement = block.querySelector('.id-addr-ux-search-text.a-text-bold');
+        if (nameElement && nameElement.textContent.trim() === addressNameToBeRemoved) {
+          addressStillExists = true;
+          break;
+        }
+      }
+
+      if (!addressStillExists) {
+        console.log('Address removed from DOM after', waited, 'ms');
+        // Wait a bit more for any animations to complete
+        await DOMHelpers.sleep(500);
+        return true;
+      }
+    }
+
+    console.log('Address still exists after timeout, may have failed to delete');
+    return false;
+  }
+
+  createDeleteProgressUI(total) {
+    const progressContainer = document.createElement('div');
+    progressContainer.id = 'address-delete-progress';
+    progressContainer.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 10004;
+      background: white;
+      border-radius: 12px;
+      padding: 25px 30px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+      min-width: 400px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+
+    progressContainer.innerHTML = `
+      <div style="text-align: center; margin-bottom: 20px;">
+        <div style="font-size: 24px; margin-bottom: 10px;">🗑️</div>
+        <div style="font-size: 18px; font-weight: 600; color: #333;">Deleting Addresses</div>
+      </div>
+
+      <div style="margin-bottom: 15px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; color: #666;">
+          <span id="delete-progress-text">0 / ${total}</span>
+          <span id="delete-progress-percent">0%</span>
+        </div>
+        <div style="background: #e0e0e0; border-radius: 10px; height: 20px; overflow: hidden;">
+          <div id="delete-progress-bar" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); height: 100%; width: 0%; transition: width 0.3s ease;"></div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-around; font-size: 13px; color: #666; margin-bottom: 15px;">
+        <div>
+          <span style="color: #10b981; font-weight: 600;" id="delete-success-count">0</span> Deleted
+        </div>
+        <div>
+          <span style="color: #ef4444; font-weight: 600;" id="delete-fail-count">0</span> Failed
+        </div>
+      </div>
+
+      <div style="padding-top: 15px; border-top: 1px solid #e0e0e0;">
+        <div style="font-size: 12px; color: #999; text-align: center; margin-bottom: 15px;">
+          Currently deleting: <span id="current-delete-item" style="color: #ef4444; font-weight: 500;">...</span>
+        </div>
+        <button id="stop-delete-btn" style="width: 100%; padding: 10px; background: #6b7280; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px; transition: all 0.2s;">
+          ⏸ Stop Deletion
+        </button>
+      </div>
+    `;
+
+    return progressContainer;
+  }
+
+  updateDeleteProgress(progressUI, current, total, successCount, failCount, currentName) {
+    const percent = Math.round((current / total) * 100);
+    progressUI.querySelector('#delete-progress-text').textContent = `${current} / ${total}`;
+    progressUI.querySelector('#delete-progress-percent').textContent = `${percent}%`;
+    progressUI.querySelector('#delete-progress-bar').style.width = `${percent}%`;
+    progressUI.querySelector('#delete-success-count').textContent = successCount;
+    progressUI.querySelector('#delete-fail-count').textContent = failCount;
+    progressUI.querySelector('#current-delete-item').textContent = currentName || `Address ${current}`;
+  }
+}
+
+
+
+// ========================================
 // MAIN APPLICATION
 // ========================================
 
@@ -2223,6 +3094,7 @@ class AmazonScraperApp {
     this.productScraper = null;
     this.bulkScraper = null;
     this.addressImporter = null;
+    this.addressDeleter = null;
     this.init();
   }
 
@@ -2249,6 +3121,9 @@ class AmazonScraperApp {
     if (DOMHelpers.isAddressPage()) {
       this.addressImporter = new AddressImporter();
       this.addressImporter.init();
+
+      this.addressDeleter = new AddressDeleter();
+      this.addressDeleter.init();
     }
   }
 }
