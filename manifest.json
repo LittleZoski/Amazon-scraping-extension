@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Amazon & Yami Product Scraper",
-  "version": "1.1.0",
-  "description": "Extract Amazon and Yami product information for re-listing on eBay",
+  "name": "Amazon, Yami & Costco Product Scraper",
+  "version": "1.2.0",
+  "description": "Extract Amazon, Yami, and Costco product information for re-listing on eBay",
   "permissions": [
     "activeTab",
     "downloads",
@@ -15,6 +15,7 @@
     "https://www.amazon.ca/*",
     "https://www.yami.com/*",
     "https://www.yamibuy.com/*",
+    "https://www.costco.com/*",
     "https://www.ebay.com/*",
     "https://www.ebay.co.uk/*",
     "https://www.ebay.ca/*"
@@ -61,6 +62,20 @@
         "src/scrapers/YamiProductScraper.js",
         "src/scrapers/YamiBulkScraper.js",
         "yami-content.js"
+      ],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "https://www.costco.com/*"
+      ],
+      "js": [
+        "src/utils/CostcoDOMHelpers.js",
+        "src/extractors/CostcoDataExtractor.js",
+        "src/utils/CostcoDataSanitizer.js",
+        "src/scrapers/CostcoProductScraper.js",
+        "src/scrapers/CostcoBulkScraper.js",
+        "costco-content.js"
       ],
       "run_at": "document_end"
     }
