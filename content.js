@@ -404,6 +404,127 @@ class UIManager {
     }, 3000);
   }
 
+  /**
+   * Show a validation warning modal with Continue/Cancel options
+   * @param {string[]} errors - Array of validation error messages
+   * @returns {Promise<boolean>} - Resolves to true if user clicks Continue, false if Cancel
+   */
+  static showValidationWarningModal(errors) {
+    return new Promise((resolve) => {
+      // Create overlay
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 10002;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      `;
+
+      // Create modal
+      const modal = document.createElement('div');
+      modal.style.cssText = `
+        background: white;
+        border-radius: 12px;
+        padding: 25px 30px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        max-width: 450px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      `;
+
+      // Format errors as list items
+      const errorList = errors.map(err => `<li style="margin-bottom: 8px;">${err}</li>`).join('');
+
+      modal.innerHTML = `
+        <div style="text-align: center; margin-bottom: 20px;">
+          <div style="font-size: 40px; margin-bottom: 10px;">⚠️</div>
+          <div style="font-size: 18px; font-weight: 600; color: #333;">Validation Warning</div>
+        </div>
+
+        <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+          <ul style="margin: 0; padding-left: 20px; color: #92400e; font-size: 14px; line-height: 1.5;">
+            ${errorList}
+          </ul>
+        </div>
+
+        <div style="display: flex; gap: 12px;">
+          <button id="modal-cancel-btn" style="
+            flex: 1;
+            padding: 12px 20px;
+            background: #e5e7eb;
+            color: #374151;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+          ">
+            Cancel
+          </button>
+          <button id="modal-continue-btn" style="
+            flex: 1;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+          ">
+            Continue Anyway
+          </button>
+        </div>
+      `;
+
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+
+      // Button handlers
+      const cancelBtn = modal.querySelector('#modal-cancel-btn');
+      const continueBtn = modal.querySelector('#modal-continue-btn');
+
+      cancelBtn.addEventListener('mouseenter', () => {
+        cancelBtn.style.background = '#d1d5db';
+      });
+      cancelBtn.addEventListener('mouseleave', () => {
+        cancelBtn.style.background = '#e5e7eb';
+      });
+
+      continueBtn.addEventListener('mouseenter', () => {
+        continueBtn.style.transform = 'scale(1.02)';
+      });
+      continueBtn.addEventListener('mouseleave', () => {
+        continueBtn.style.transform = 'scale(1)';
+      });
+
+      cancelBtn.addEventListener('click', () => {
+        overlay.remove();
+        resolve(false);
+      });
+
+      continueBtn.addEventListener('click', () => {
+        overlay.remove();
+        resolve(true);
+      });
+
+      // Close on overlay click (outside modal)
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          overlay.remove();
+          resolve(false);
+        }
+      });
+    });
+  }
+
   static createProgressIndicator(total) {
     const progressContainer = document.createElement('div');
     progressContainer.id = 'amazon-scraper-progress';
@@ -1239,11 +1360,15 @@ class ProductScraper {
       );
 
       if (!validation.isValid) {
-        const errorMessage = '❌ Cannot scrape this product:\n\n' + validation.errors.join('\n\n');
-        alert(errorMessage);
-        this.scrapeButton.innerHTML = '📦 Scrape for eBay';
-        this.scrapeButton.disabled = false;
-        return;
+        // Show modal with Continue/Cancel options
+        const shouldContinue = await UIManager.showValidationWarningModal(validation.errors);
+
+        if (!shouldContinue) {
+          this.scrapeButton.innerHTML = '📦 Scrape for eBay';
+          this.scrapeButton.disabled = false;
+          return;
+        }
+        // User chose to continue despite warnings
       }
 
       const sanitizedData = DataSanitizer.sanitizeProductData(productData);
