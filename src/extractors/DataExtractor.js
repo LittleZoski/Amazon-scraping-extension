@@ -20,7 +20,8 @@ export class DataExtractor {
       specifications: this.getSpecifications(),
       url: window.location.href,
       scrapedAt: new Date().toISOString(),
-      source: 'amazon' // Add source field
+      source: 'amazon', // Add source field
+      customizedFinalPrice: null
     };
   }
 

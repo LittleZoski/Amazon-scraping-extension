@@ -175,14 +175,31 @@
       transition: all 0.2s;
     }
 
-    .btn-view {
+    .btn-edit {
       background: #3b82f6;
       color: white;
+    }
+
+    .btn-edit:hover {
+      background: #2563eb;
     }
 
     .btn-delete {
       background: #ef4444;
       color: white;
+    }
+
+    .custom-price-badge {
+      display: inline-block;
+      background: #fef3c7;
+      color: #92400e;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 4px;
+      border: 1px solid #f59e0b;
+      vertical-align: middle;
+      margin-left: 4px;
     }
 
     .empty-state {
@@ -342,6 +359,139 @@
 
     .btn-modal-close:hover {
       background: #4b5563;
+    }
+
+    /* Edit Modal */
+    .edit-modal-content {
+      max-width: 680px;
+      width: 96%;
+    }
+
+    .edit-modal-body {
+      padding: 16px 20px;
+    }
+
+    .edit-section {
+      margin-bottom: 18px;
+    }
+
+    .edit-section-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #667eea;
+      margin-bottom: 10px;
+      padding-bottom: 5px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .json-toggle-header {
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .json-toggle-header:hover {
+      color: #4f46e5;
+    }
+
+    .json-toggle-arrow {
+      font-size: 11px;
+    }
+
+    .json-preview-wrap {
+      margin-top: 8px;
+    }
+
+    .edit-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    .edit-row .edit-field {
+      flex: 1;
+    }
+
+    .edit-field {
+      margin-bottom: 10px;
+    }
+
+    .edit-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 4px;
+    }
+
+    .edit-label-highlight {
+      color: #92400e;
+    }
+
+    .edit-label-note {
+      font-weight: 400;
+      color: #9ca3af;
+      font-size: 11px;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .edit-input {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #111827;
+      outline: none;
+      transition: border-color 0.15s;
+      box-sizing: border-box;
+    }
+
+    .edit-input:focus {
+      border-color: #667eea;
+      box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.15);
+    }
+
+    .edit-input-highlight {
+      border-color: #f59e0b;
+      background: #fffbeb;
+    }
+
+    .edit-input-highlight:focus {
+      border-color: #d97706;
+      box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+    }
+
+    .edit-textarea {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #111827;
+      outline: none;
+      resize: vertical;
+      font-family: inherit;
+      transition: border-color 0.15s;
+      box-sizing: border-box;
+    }
+
+    .edit-textarea:focus {
+      border-color: #667eea;
+      box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.15);
+    }
+
+    .btn-save-edit {
+      background: #667eea;
+      color: white;
+    }
+
+    .btn-save-edit:hover {
+      background: #4f46e5;
     }
 
     /* Tabs */

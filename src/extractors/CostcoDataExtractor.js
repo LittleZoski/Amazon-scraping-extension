@@ -29,7 +29,8 @@ class CostcoDataExtractor {
       specifications: this.getSpecifications(),
       url: window.location.href,
       scrapedAt: new Date().toISOString(),
-      source: 'costco'
+      source: 'costco',
+      customizedFinalPrice: null
     };
   }
 

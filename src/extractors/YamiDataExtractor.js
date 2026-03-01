@@ -27,7 +27,8 @@ class YamiDataExtractor {
       countryOfOrigin: this.getCountryOfOrigin(), // Add country of origin field
       url: window.location.href,
       scrapedAt: new Date().toISOString(),
-      source: 'yami' // Add source field
+      source: 'yami', // Add source field
+      customizedFinalPrice: null
     };
   }
 

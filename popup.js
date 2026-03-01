@@ -118,77 +118,225 @@ class PopupManager {
       ? product.images[0]
       : 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="60" height="60"%3E%3Crect fill="%23f3f4f6" width="60" height="60"/%3E%3C/svg%3E';
 
+    const customPriceTag = product.customizedFinalPrice != null
+      ? `<span class="custom-price-badge">Custom: $${product.customizedFinalPrice}</span>`
+      : '';
+
     card.innerHTML = `
       <div class="product-header">
         <img class="product-image" src="${imageUrl}" alt="Product">
         <div class="product-info">
           <div class="product-title">${product.title || 'No title'}</div>
-          <div class="product-price">${product.price || 'No price'}</div>
-          <div class="product-asin">ASIN: ${product.asin || 'N/A'}</div>
+          <div class="product-price">${product.price || 'No price'} ${customPriceTag}</div>
+          <div class="product-asin">${product.source ? product.source.toUpperCase() + ' · ' : ''}${product.asin || 'N/A'}</div>
         </div>
       </div>
       <div class="product-actions">
-        <button class="btn-small btn-view" data-index="${index}">View Details</button>
+        <button class="btn-small btn-edit" data-index="${index}">Edit Details</button>
         <button class="btn-small btn-delete" data-index="${index}">Delete</button>
       </div>
     `;
 
-    // Add event listeners
-    card.querySelector('.btn-view').addEventListener('click', () => this.viewProduct(index));
+    card.querySelector('.btn-edit').addEventListener('click', () => this.editProduct(index));
     card.querySelector('.btn-delete').addEventListener('click', () => this.deleteProduct(index));
 
     return card;
   }
 
-  viewProduct(index) {
+  editProduct(index) {
     const product = this.products[index];
-    this.showProductDetails(product);
+    this.showEditModal(product, index);
   }
 
-  showProductDetails(product) {
-    // Create modal overlay
+  showEditModal(product, index) {
+    const escapeHtml = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    const bulletPointsText = Array.isArray(product.bulletPoints)
+      ? product.bulletPoints.join('\n')
+      : (product.bulletPoints || '');
+
+    const specsText = product.specifications
+      ? (typeof product.specifications === 'object' && !Array.isArray(product.specifications)
+          ? Object.entries(product.specifications).map(([k, v]) => `${k}: ${v}`).join('\n')
+          : JSON.stringify(product.specifications, null, 2))
+      : '';
+
     const modal = document.createElement('div');
     modal.className = 'product-details-modal';
     modal.innerHTML = `
-      <div class="modal-content">
+      <div class="modal-content edit-modal-content">
         <div class="modal-header">
-          <h2>Product Details</h2>
+          <h2>Edit Product Details</h2>
           <button class="modal-close">&times;</button>
         </div>
-        <div class="modal-body">
-          <pre class="json-display">${JSON.stringify(product, null, 2)}</pre>
+        <div class="modal-body edit-modal-body">
+
+          <div class="edit-section">
+            <div class="edit-section-title">Basic Info</div>
+            <div class="edit-field">
+              <label class="edit-label">Title</label>
+              <input class="edit-input" id="edit-title" type="text" value="${escapeHtml(product.title)}">
+            </div>
+            <div class="edit-row">
+              <div class="edit-field">
+                <label class="edit-label">ID / ASIN</label>
+                <input class="edit-input" id="edit-asin" type="text" value="${escapeHtml(product.asin)}">
+              </div>
+              <div class="edit-field">
+                <label class="edit-label">Source</label>
+                <input class="edit-input" id="edit-source" type="text" value="${escapeHtml(product.source)}" readonly style="background:#f3f4f6; color:#6b7280;">
+              </div>
+            </div>
+          </div>
+
+          <div class="edit-section">
+            <div class="edit-section-title">Pricing</div>
+            <div class="edit-row">
+              <div class="edit-field">
+                <label class="edit-label">Price (scraped)</label>
+                <input class="edit-input" id="edit-price" type="text" value="${escapeHtml(product.price)}" placeholder="e.g. $12.99">
+              </div>
+              <div class="edit-field">
+                <label class="edit-label">Delivery Fee</label>
+                <input class="edit-input" id="edit-deliveryFee" type="text" value="${escapeHtml(product.deliveryFee)}" placeholder="e.g. $5.99">
+              </div>
+            </div>
+            <div class="edit-field">
+              <label class="edit-label edit-label-highlight">Customized Final Price <span class="edit-label-note">(overrides multiplier in listing app)</span></label>
+              <input class="edit-input edit-input-highlight" id="edit-customizedFinalPrice" type="number" step="0.01" min="0"
+                value="${product.customizedFinalPrice != null ? product.customizedFinalPrice : ''}"
+                placeholder="Leave blank to use default pricing strategy">
+            </div>
+          </div>
+
+          <div class="edit-section">
+            <div class="edit-section-title">Description</div>
+            <div class="edit-field">
+              <label class="edit-label">Description</label>
+              <textarea class="edit-textarea" id="edit-description" rows="4">${escapeHtml(product.description)}</textarea>
+            </div>
+          </div>
+
+          <div class="edit-section">
+            <div class="edit-section-title">Bullet Points <span class="edit-label-note">(one per line)</span></div>
+            <div class="edit-field">
+              <textarea class="edit-textarea" id="edit-bulletPoints" rows="5">${escapeHtml(bulletPointsText)}</textarea>
+            </div>
+          </div>
+
+          <div class="edit-section">
+            <div class="edit-section-title">Specifications <span class="edit-label-note">(key: value, one per line)</span></div>
+            <div class="edit-field">
+              <textarea class="edit-textarea" id="edit-specifications" rows="5">${escapeHtml(specsText)}</textarea>
+            </div>
+          </div>
+
+          <div class="edit-section">
+            <div class="edit-section-title json-toggle-header" id="jsonToggle">
+              Raw JSON <span class="json-toggle-arrow">▶</span>
+            </div>
+            <div class="json-preview-wrap" id="jsonPreviewWrap" style="display:none;">
+              <pre class="json-display" id="jsonPreview">${escapeHtml(JSON.stringify(product, null, 2))}</pre>
+            </div>
+          </div>
+
         </div>
         <div class="modal-footer">
-          <button class="btn-copy">Copy JSON</button>
-          ${product.url ? `<button class="btn-visit">Visit Amazon Page</button>` : ''}
-          <button class="btn-modal-close">Close</button>
+          <button class="btn-copy" id="btnCopyJson">Copy JSON</button>
+          <button class="btn-save-edit" id="btnSaveEdit">Save Changes</button>
+          <button class="btn-modal-close" id="btnCancelEdit">Cancel</button>
         </div>
       </div>
     `;
 
     document.body.appendChild(modal);
 
-    // Add event listeners
-    const closeModal = () => {
-      modal.remove();
-    };
+    const closeModal = () => modal.remove();
 
     modal.querySelector('.modal-close').addEventListener('click', closeModal);
-    modal.querySelector('.btn-modal-close').addEventListener('click', closeModal);
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) closeModal();
+    modal.querySelector('#btnCancelEdit').addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    // JSON toggle
+    modal.querySelector('#jsonToggle').addEventListener('click', () => {
+      const wrap = modal.querySelector('#jsonPreviewWrap');
+      const arrow = modal.querySelector('.json-toggle-arrow');
+      const isHidden = wrap.style.display === 'none';
+      wrap.style.display = isHidden ? 'block' : 'none';
+      arrow.textContent = isHidden ? '▼' : '▶';
+      if (isHidden) this._refreshJsonPreview(modal, product, index);
     });
 
-    modal.querySelector('.btn-copy').addEventListener('click', () => {
-      navigator.clipboard.writeText(JSON.stringify(product, null, 2));
-      alert('JSON copied to clipboard!');
+    // Copy JSON
+    modal.querySelector('#btnCopyJson').addEventListener('click', () => {
+      const current = this._buildUpdatedProduct(modal, product);
+      navigator.clipboard.writeText(JSON.stringify(current, null, 2));
+      const btn = modal.querySelector('#btnCopyJson');
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy JSON'; }, 1500);
     });
 
-    if (product.url) {
-      modal.querySelector('.btn-visit').addEventListener('click', () => {
-        chrome.tabs.create({ url: product.url });
+    // Save
+    modal.querySelector('#btnSaveEdit').addEventListener('click', () => {
+      const updated = this._buildUpdatedProduct(modal, product);
+      this.products[index] = updated;
+      chrome.storage.local.set({ scrapedProducts: this.products }, () => {
+        this.renderProducts();
+        this.updateStats();
+        closeModal();
       });
+    });
+  }
+
+  _buildUpdatedProduct(modal, original) {
+    const get = (id) => modal.querySelector(`#${id}`)?.value ?? '';
+
+    const bulletRaw = get('edit-bulletPoints');
+    const bulletPoints = bulletRaw.trim()
+      ? bulletRaw.split('\n').map(l => l.trim()).filter(Boolean)
+      : original.bulletPoints;
+
+    const specsRaw = get('edit-specifications').trim();
+    let specifications = original.specifications;
+    if (specsRaw) {
+      try {
+        // Try JSON parse first
+        specifications = JSON.parse(specsRaw);
+      } catch {
+        // Parse "key: value" lines
+        const parsed = {};
+        specsRaw.split('\n').forEach(line => {
+          const idx = line.indexOf(':');
+          if (idx > -1) {
+            const k = line.slice(0, idx).trim();
+            const v = line.slice(idx + 1).trim();
+            if (k) parsed[k] = v;
+          }
+        });
+        specifications = Object.keys(parsed).length ? parsed : original.specifications;
+      }
     }
+
+    const cfpRaw = get('edit-customizedFinalPrice').trim();
+    const customizedFinalPrice = cfpRaw !== '' ? parseFloat(cfpRaw) : null;
+
+    return {
+      ...original,
+      title: get('edit-title') || original.title,
+      asin: get('edit-asin') || original.asin,
+      price: get('edit-price') || original.price,
+      deliveryFee: get('edit-deliveryFee') !== undefined ? get('edit-deliveryFee') : original.deliveryFee,
+      customizedFinalPrice,
+      description: get('edit-description') || original.description,
+      bulletPoints,
+      specifications,
+    };
+  }
+
+  _refreshJsonPreview(modal, original, index) {
+    const current = this._buildUpdatedProduct(modal, original);
+    const pre = modal.querySelector('#jsonPreview');
+    if (pre) pre.textContent = JSON.stringify(current, null, 2);
   }
 
   deleteProduct(index) {
