@@ -298,11 +298,12 @@
         <th style="width:100px;text-align:center;">Watching</th>
         <th style="width:130px;text-align:center;">Scanned</th>
         <th style="width:110px;text-align:center;">Links</th>
+        <th style="width:140px;text-align:center;">Amazon</th>
         <th style="width:70px;text-align:center;"></th>
       </tr>
     </thead>
     <tbody id="resultsBody">
-      <tr><td colspan="9" class="empty-state">Loading...</td></tr>
+      <tr><td colspan="10" class="empty-state">Loading...</td></tr>
     </tbody>
   </table>
 </div>
@@ -388,7 +389,7 @@
 
     if (items.length === 0) {
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td colspan="9" class="empty-state">No items match the current filters.</td>';
+      tr.innerHTML = '<td colspan="10" class="empty-state">No items match the current filters.</td>';
       tbody.appendChild(tr);
       return;
     }
@@ -426,6 +427,11 @@
       <td class="date-cell" style="text-align:center;">${scannedDate}</td>
       <td style="text-align:center;">
         <a class="link-btn" href="${esc(item.revisionUrl)}" target="_blank" rel="noopener">History</a>
+      </td>
+      <td style="text-align:center;">
+        <a class="link-btn" href="https://www.amazon.com/s?k=${encodeURIComponent((item.title || '').slice(0, 120))}"
+           target="_blank" rel="noopener"
+           style="background:#fff3e0;color:#e65100;font-weight:700;">Find on Amazon</a>
       </td>
       <td style="text-align:center;">
         <button class="del-btn" data-id="${esc(item.itemId)}">Del</button>

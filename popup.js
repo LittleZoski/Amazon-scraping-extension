@@ -771,6 +771,13 @@ class PopupManager {
         </a>
         <button class="btn-small btn-delete" data-index="${index}">Delete</button>
       </div>
+      <div class="product-actions" style="margin-top:4px;">
+        <a href="https://www.amazon.com/s?k=${encodeURIComponent((item.title || '').slice(0, 120))}" target="_blank"
+           style="flex:1;padding:6px;background:#ff9900;color:#111;border:none;border-radius:4px;
+                  font-size:11px;font-weight:700;text-align:center;text-decoration:none;display:block;">
+          Find on Amazon
+        </a>
+      </div>
     `;
 
     card.querySelector('.btn-delete').addEventListener('click', () => this.deleteScannedItem(index));
