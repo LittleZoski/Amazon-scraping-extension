@@ -13,6 +13,7 @@
   class EbayOrderScraperApp {
     constructor() {
       this.scraper = null;
+      this.bookmarks = null;
       this.OrderScraper = null;
       this.BulkOrderScraper = null;
       this.init();
@@ -32,10 +33,12 @@
         const orderScraperModule = await import(chrome.runtime.getURL('src/scrapers/OrderScraper.js'));
         const bulkOrderScraperModule = await import(chrome.runtime.getURL('src/scrapers/BulkOrderScraper.js'));
         const saleScannerModule = await import(chrome.runtime.getURL('src/scrapers/EbaySaleScanner.js'));
+        const sellerBookmarksModule = await import(chrome.runtime.getURL('src/scrapers/EbaySellerBookmarks.js'));
 
         this.OrderScraper = orderScraperModule.OrderScraper;
         this.BulkOrderScraper = bulkOrderScraperModule.BulkOrderScraper;
         this.EbaySaleScanner = saleScannerModule.EbaySaleScanner;
+        this.EbaySellerBookmarks = sellerBookmarksModule.EbaySellerBookmarks;
         console.log('✓ Scraper modules loaded successfully');
       } catch (error) {
         console.error('❌ Failed to load scraper modules:', error);
@@ -99,6 +102,13 @@
             console.warn(`⚠ No scraper needed for page type: "${pageType}"`);
             console.log('Supported page types: order-details, purchase-history, seller-hub');
             break;
+        }
+
+        // Always inject Seller Bookmarks widget on every eBay page
+        if (!this.bookmarks && this.EbaySellerBookmarks) {
+          this.bookmarks = new this.EbaySellerBookmarks();
+          this.bookmarks.init();
+          console.log('✓ EbaySellerBookmarks initialized');
         }
       } catch (error) {
         console.error('❌ Error initializing eBay scraper:', error);
@@ -199,6 +209,10 @@
       if (this.scraper) {
         this.scraper.cleanup();
         this.scraper = null;
+      }
+      if (this.bookmarks) {
+        this.bookmarks.cleanup();
+        this.bookmarks = null;
       }
     }
   }
