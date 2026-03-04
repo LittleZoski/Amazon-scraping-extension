@@ -542,6 +542,7 @@
   <div class="tabs">
     <button class="tab-btn active" data-tab="products">Products</button>
     <button class="tab-btn" data-tab="orders">Orders</button>
+    <button class="tab-btn" data-tab="scanned">Scanned Items</button>
   </div>
 
   <div class="tab-content" id="products-tab">
@@ -590,6 +591,32 @@
       <div class="empty-state">
         <div class="empty-state-icon">📦</div>
         <div class="empty-state-text">No orders scraped yet.<br>Visit an eBay order page and click "Scrape Order for Export"</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content hidden" id="scanned-tab">
+    <div class="stats">
+      <div class="stat-item">
+        <div class="stat-number" id="totalScanned">0</div>
+        <div class="stat-label">Items Scanned</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-number" id="totalSellers">0</div>
+        <div class="stat-label">Sellers</div>
+      </div>
+    </div>
+
+    <div class="controls" style="flex-wrap:wrap;">
+      <button class="btn btn-primary" id="exportScannedBtn">Export JSON</button>
+      <button class="btn btn-primary" id="enlargedViewBtn" style="background:rgba(255,255,255,0.85);">Enlarged View</button>
+      <button class="btn btn-danger" id="clearScannedBtn">Clear All</button>
+    </div>
+
+    <div class="products-container" id="scannedContainer">
+      <div class="empty-state">
+        <div class="empty-state-icon">🔍</div>
+        <div class="empty-state-text">No scan results yet.<br>Visit an eBay store and use the Sale Scanner button.</div>
       </div>
     </div>
   </div>

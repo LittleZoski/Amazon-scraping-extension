@@ -4,6 +4,7 @@ class PopupManager {
   constructor() {
     this.products = [];
     this.orders = [];
+    this.scannedItems = [];
     this.currentTab = 'products';
     this.init();
   }
@@ -11,6 +12,7 @@ class PopupManager {
   init() {
     this.loadProducts();
     this.loadOrders();
+    this.loadScannedItems();
     this.setupEventListeners();
     this.setupTabListeners();
     this.setupStorageListener();
@@ -21,6 +23,9 @@ class PopupManager {
     document.getElementById('clearBtn').addEventListener('click', () => this.clearProducts());
     document.getElementById('exportOrdersBtn').addEventListener('click', () => this.exportOrders());
     document.getElementById('clearOrdersBtn').addEventListener('click', () => this.clearOrders());
+    document.getElementById('exportScannedBtn').addEventListener('click', () => this.exportScannedItems());
+    document.getElementById('clearScannedBtn').addEventListener('click', () => this.clearScannedItems());
+    document.getElementById('enlargedViewBtn').addEventListener('click', () => this.showEnlargedView());
   }
 
   setupTabListeners() {
@@ -46,6 +51,11 @@ class PopupManager {
           this.orders = changes.scrapedOrders.newValue || [];
           this.renderOrders();
           this.updateOrderStats();
+        }
+        if (changes.scannedItems) {
+          this.scannedItems = changes.scannedItems.newValue || [];
+          this.renderScannedItems();
+          this.updateScannedStats();
         }
       }
     });
@@ -675,6 +685,147 @@ class PopupManager {
         this.updateOrderStats();
       });
     }
+  }
+
+  // ── Scanned Items ─────────────────────────────────────────────────────────────
+
+  loadScannedItems() {
+    chrome.storage.local.get(['scannedItems'], (result) => {
+      this.scannedItems = result.scannedItems || [];
+      this.renderScannedItems();
+      this.updateScannedStats();
+    });
+  }
+
+  updateScannedStats() {
+    document.getElementById('totalScanned').textContent = this.scannedItems.length;
+    const sellers = new Set(this.scannedItems.map(i => i.seller).filter(Boolean));
+    document.getElementById('totalSellers').textContent = sellers.size;
+  }
+
+  renderScannedItems() {
+    const container = document.getElementById('scannedContainer');
+
+    if (this.scannedItems.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">🔍</div>
+          <div class="empty-state-text">No scan results yet.<br>Visit an eBay store and use the Sale Scanner button.</div>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = '';
+    // Show newest scans first
+    const sorted = [...this.scannedItems].sort((a, b) =>
+      (b.scannedAt || '').localeCompare(a.scannedAt || '')
+    );
+    sorted.forEach((item, index) => {
+      // index in sorted may differ from index in this.scannedItems — pass the real index
+      const realIndex = this.scannedItems.indexOf(item);
+      container.appendChild(this.createScannedItemCard(item, realIndex));
+    });
+  }
+
+  createScannedItemCard(item, index) {
+    const card = document.createElement('div');
+    card.className = 'product-card';
+
+    const imgHtml = item.image
+      ? `<img class="product-image" src="${item.image}" alt="" style="width:50px;height:50px;object-fit:contain;">`
+      : `<div class="product-image" style="width:50px;height:50px;background:#f3f4f6;"></div>`;
+
+    const soldColor = item.soldCount > 0 ? '#2e7d32' : '#9ca3af';
+    const watchColor = item.watchingCount > 0 ? '#1565c0' : '#9ca3af';
+    const scannedDate = item.scannedAt ? new Date(item.scannedAt).toLocaleDateString() : '';
+
+    card.innerHTML = `
+      <div class="product-header">
+        ${imgHtml}
+        <div class="product-info">
+          <div class="product-title">${item.title || 'No title'}</div>
+          <div class="product-price">${item.priceText || '—'}</div>
+          <div class="product-asin" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <span style="color:#555;">Seller: <strong>${item.seller || '—'}</strong></span>
+            <span style="background:#e8f5e9;color:${soldColor};padding:1px 7px;border-radius:10px;font-weight:700;font-size:11px;">
+              ${item.soldCount} sold
+            </span>
+            <span style="background:#e3f2fd;color:${watchColor};padding:1px 7px;border-radius:10px;font-weight:700;font-size:11px;">
+              ${item.watchingCount} watching
+            </span>
+            ${scannedDate ? `<span style="color:#aaa;font-size:10px;">${scannedDate}</span>` : ''}
+          </div>
+        </div>
+      </div>
+      <div class="product-actions">
+        <a href="${item.url}" target="_blank"
+           style="flex:1;padding:6px;background:#0064d2;color:white;border:none;border-radius:4px;
+                  font-size:11px;font-weight:600;text-align:center;text-decoration:none;display:block;">
+          eBay Item
+        </a>
+        <a href="${item.revisionUrl}" target="_blank"
+           style="flex:1;padding:6px;background:#6b7280;color:white;border:none;border-radius:4px;
+                  font-size:11px;font-weight:600;text-align:center;text-decoration:none;display:block;">
+          History
+        </a>
+        <button class="btn-small btn-delete" data-index="${index}">Delete</button>
+      </div>
+    `;
+
+    card.querySelector('.btn-delete').addEventListener('click', () => this.deleteScannedItem(index));
+    return card;
+  }
+
+  deleteScannedItem(index) {
+    if (confirm('Remove this item from the scanned list?')) {
+      this.scannedItems.splice(index, 1);
+      chrome.storage.local.set({ scannedItems: this.scannedItems }, () => {
+        this.renderScannedItems();
+        this.updateScannedStats();
+      });
+    }
+  }
+
+  exportScannedItems() {
+    if (this.scannedItems.length === 0) {
+      alert('No scanned items to export');
+      return;
+    }
+
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      totalItems: this.scannedItems.length,
+      items: this.scannedItems,
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+
+    chrome.downloads.download({
+      url: url,
+      filename: `ebay-scanned-items-${timestamp}.json`,
+      saveAs: true,
+    }, () => {
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  clearScannedItems() {
+    if (this.scannedItems.length === 0) return;
+
+    if (confirm(`Clear all ${this.scannedItems.length} scanned items?`)) {
+      this.scannedItems = [];
+      chrome.storage.local.set({ scannedItems: [] }, () => {
+        this.renderScannedItems();
+        this.updateScannedStats();
+      });
+    }
+  }
+
+  showEnlargedView() {
+    chrome.tabs.create({ url: chrome.runtime.getURL('scanned-view.html') });
   }
 }
 

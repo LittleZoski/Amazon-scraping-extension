@@ -31,9 +31,11 @@
         console.log('Loading scraper modules...');
         const orderScraperModule = await import(chrome.runtime.getURL('src/scrapers/OrderScraper.js'));
         const bulkOrderScraperModule = await import(chrome.runtime.getURL('src/scrapers/BulkOrderScraper.js'));
+        const saleScannerModule = await import(chrome.runtime.getURL('src/scrapers/EbaySaleScanner.js'));
 
         this.OrderScraper = orderScraperModule.OrderScraper;
         this.BulkOrderScraper = bulkOrderScraperModule.BulkOrderScraper;
+        this.EbaySaleScanner = saleScannerModule.EbaySaleScanner;
         console.log('✓ Scraper modules loaded successfully');
       } catch (error) {
         console.error('❌ Failed to load scraper modules:', error);
@@ -85,6 +87,14 @@
             console.log('✓ BulkOrderScraper initialized for seller hub page');
             break;
 
+          case 'seller-store':
+            // Public seller store page - inject the Sale Scanner button
+            console.log('Creating EbaySaleScanner instance for seller store page...');
+            this.scraper = new this.EbaySaleScanner();
+            this.scraper.init();
+            console.log('✓ EbaySaleScanner initialized for seller store page');
+            break;
+
           default:
             console.warn(`⚠ No scraper needed for page type: "${pageType}"`);
             console.log('Supported page types: order-details, purchase-history, seller-hub');
@@ -106,6 +116,11 @@
 
       console.log('Detecting page type for URL:', url);
       console.log('Pathname:', pathname);
+
+      // Seller store pages — URL path patterns
+      if (pathname.startsWith('/str/') || pathname.startsWith('/usr/')) {
+        return 'seller-store';
+      }
 
       // Order details page - check for orderid parameter or /ord/details path
       if (
@@ -143,6 +158,34 @@
         url.includes('/myb/ActiveListing')
       ) {
         return 'seller-hub';
+      }
+
+      // Seller-filtered search page: any eBay URL with ?_ssn=SELLER
+      // e.g. https://www.ebay.com/sch/i.html?_ssn=kirnlatifessentialgoods1
+      // Exclude individual item pages to avoid false positives
+      if (!pathname.startsWith('/itm/')) {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('_ssn')) {
+          return 'seller-store';
+        }
+      }
+
+      // DOM-based fallback: detect any seller store page by looking for
+      // seller identity elements that eBay renders on store/user pages.
+      // Exclude item pages (/itm/) and generic search pages (/sch/ without _ssn).
+      if (!pathname.startsWith('/itm/') && !pathname.startsWith('/sch/') && !pathname.startsWith('/b/')) {
+        const sellerIndicators = [
+          '.str-seller-card__name',
+          '[class*="str-seller-card"]',
+          '.str-header',
+          '.mbg-nw',        // user page member badge
+          '.member-profile', // user profile area
+          '[data-seller-name]',
+        ];
+        const hasSellerUI = sellerIndicators.some(sel => document.querySelector(sel));
+        if (hasSellerUI) {
+          return 'seller-store';
+        }
       }
 
       console.log('No matching page type found');

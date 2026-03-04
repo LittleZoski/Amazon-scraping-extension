@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scanned Items Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f7fa;
+      color: #222;
+      min-height: 100vh;
+    }
+
+    .page-header {
+      background: white;
+      border-bottom: 1px solid #e0e0e0;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+
+    .page-header h1 {
+      font-size: 20px;
+      color: #1a1a1a;
+      font-weight: 700;
+    }
+
+    .page-header .subtitle {
+      font-size: 13px;
+      color: #888;
+      margin-top: 2px;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+
+    .btn-green  { background: #2e7d32; color: white; }
+    .btn-blue   { background: #1565c0; color: white; }
+    .btn-red    { background: #c62828; color: white; }
+    .btn-gray   { background: #e0e0e0; color: #444; }
+
+    .filters-bar {
+      background: white;
+      border-bottom: 1px solid #efefef;
+      padding: 12px 24px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .filters-bar label {
+      font-size: 12px;
+      color: #666;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .filters-bar input[type="number"],
+    .filters-bar select {
+      padding: 6px 10px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #222;
+      background: white;
+    }
+
+    .filters-bar input[type="number"] { width: 80px; }
+
+    #sellerFilter { min-width: 160px; }
+    #sortSelect   { min-width: 160px; }
+
+    .btn-apply {
+      padding: 6px 16px;
+      background: #0064d2;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #countDisplay {
+      font-size: 12px;
+      color: #aaa;
+      margin-left: 8px;
+    }
+
+    .table-wrap {
+      padding: 0 24px 24px;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+      margin-top: 16px;
+    }
+
+    thead tr {
+      background: #f5f5f5;
+    }
+
+    th {
+      padding: 12px 14px;
+      text-align: left;
+      font-size: 12px;
+      font-weight: 700;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-bottom: 2px solid #e0e0e0;
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid #f0f0f0;
+      vertical-align: middle;
+    }
+
+    tbody tr:hover { background: #f5f8ff; }
+    tbody tr:last-child td { border-bottom: none; }
+
+    .thumb {
+      width: 56px;
+      height: 56px;
+      object-fit: contain;
+      border-radius: 5px;
+      border: 1px solid #eee;
+    }
+
+    .thumb-placeholder {
+      width: 56px;
+      height: 56px;
+      background: #f3f4f6;
+      border-radius: 5px;
+    }
+
+    .item-title {
+      font-weight: 600;
+      color: #0064d2;
+      text-decoration: none;
+      display: block;
+      max-width: 380px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+    }
+    .item-title:hover { text-decoration: underline; }
+
+    .item-id {
+      font-size: 11px;
+      color: #ccc;
+      margin-top: 2px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .badge-sold    { background: #e8f5e9; color: #2e7d32; }
+    .badge-watch   { background: #e3f2fd; color: #1565c0; }
+    .badge-zero    { background: #f5f5f5; color: #aaa; }
+
+    .link-btn {
+      display: inline-block;
+      padding: 4px 12px;
+      background: #f0f0f0;
+      color: #555;
+      text-decoration: none;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .link-btn:hover { background: #e0e0e0; }
+
+    .del-btn {
+      padding: 4px 10px;
+      background: none;
+      border: 1px solid #f0f0f0;
+      border-radius: 5px;
+      color: #ef4444;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .del-btn:hover { background: #fef2f2; }
+
+    .empty-state {
+      text-align: center;
+      padding: 80px 0;
+      color: #aaa;
+      font-size: 16px;
+    }
+
+    .seller-tag {
+      font-size: 11px;
+      background: #f3f4f6;
+      color: #555;
+      padding: 2px 8px;
+      border-radius: 10px;
+      display: inline-block;
+    }
+
+    .date-cell {
+      font-size: 11px;
+      color: #aaa;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+
+<div class="page-header">
+  <div>
+    <h1>Scanned Items Viewer</h1>
+    <div class="subtitle" id="headerSubtitle">Loading...</div>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-green" id="exportJsonBtn">Export JSON</button>
+    <button class="btn btn-blue" id="exportCsvBtn">Export CSV</button>
+    <button class="btn btn-red" id="clearAllBtn">Clear All</button>
+  </div>
+</div>
+
+<div class="filters-bar">
+  <label>Seller:</label>
+  <select id="sellerFilter">
+    <option value="">All Sellers</option>
+  </select>
+
+  <label>Min Sold:</label>
+  <input type="number" id="minSold" value="0" min="0">
+
+  <label>Min Watching:</label>
+  <input type="number" id="minWatching" value="0" min="0">
+
+  <label>Sort:</label>
+  <select id="sortSelect">
+    <option value="sold-desc">Most Sold</option>
+    <option value="sold-asc">Least Sold</option>
+    <option value="watching-desc">Most Watching</option>
+    <option value="watching-asc">Least Watching</option>
+    <option value="date-desc">Newest Scan</option>
+    <option value="date-asc">Oldest Scan</option>
+    <option value="price-asc">Price Low→High</option>
+    <option value="price-desc">Price High→Low</option>
+  </select>
+
+  <button class="btn-apply" id="applyFiltersBtn">Apply Filters</button>
+  <span id="countDisplay"></span>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:68px;"></th>
+        <th>Title</th>
+        <th style="width:120px;">Seller</th>
+        <th style="width:110px;">Price</th>
+        <th style="width:90px;text-align:center;">Sold</th>
+        <th style="width:100px;text-align:center;">Watching</th>
+        <th style="width:130px;text-align:center;">Scanned</th>
+        <th style="width:110px;text-align:center;">Links</th>
+        <th style="width:70px;text-align:center;"></th>
+      </tr>
+    </thead>
+    <tbody id="resultsBody">
+      <tr><td colspan="9" class="empty-state">Loading...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  let allItems = [];
+
+  // ── Load data ─────────────────────────────────────────────────────────────────
+  chrome.storage.local.get(['scannedItems'], (result) => {
+    allItems = result.scannedItems || [];
+    buildSellerFilter();
+    applyAndRender();
+    document.getElementById('headerSubtitle').textContent =
+      `${allItems.length} items from ${new Set(allItems.map(i => i.seller).filter(Boolean)).size} sellers`;
+  });
+
+  chrome.storage.onChanged.addListener((changes, ns) => {
+    if (ns === 'local' && changes.scannedItems) {
+      allItems = changes.scannedItems.newValue || [];
+      buildSellerFilter();
+      applyAndRender();
+    }
+  });
+
+  // ── Seller filter dropdown ─────────────────────────────────────────────────────
+  function buildSellerFilter() {
+    const sel = document.getElementById('sellerFilter');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">All Sellers</option>';
+    const sellers = [...new Set(allItems.map(i => i.seller).filter(Boolean))].sort();
+    for (const s of sellers) {
+      const opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = s;
+      if (s === current) opt.selected = true;
+      sel.appendChild(opt);
+    }
+  }
+
+  // ── Filter + Sort + Render ────────────────────────────────────────────────────
+  function applyAndRender() {
+    const seller   = document.getElementById('sellerFilter').value;
+    const minSold  = parseInt(document.getElementById('minSold').value || '0', 10);
+    const minWatch = parseInt(document.getElementById('minWatching').value || '0', 10);
+    const sort     = document.getElementById('sortSelect').value;
+
+    let filtered = allItems.filter(item =>
+      item.soldCount >= minSold &&
+      item.watchingCount >= minWatch &&
+      (!seller || item.seller === seller)
+    );
+
+    filtered.sort((a, b) => {
+      switch (sort) {
+        case 'sold-desc':     return b.soldCount - a.soldCount;
+        case 'sold-asc':      return a.soldCount - b.soldCount;
+        case 'watching-desc': return b.watchingCount - a.watchingCount;
+        case 'watching-asc':  return a.watchingCount - b.watchingCount;
+        case 'date-desc':     return (b.scannedAt || '').localeCompare(a.scannedAt || '');
+        case 'date-asc':      return (a.scannedAt || '').localeCompare(b.scannedAt || '');
+        case 'price-asc':     return parsePrice(a.priceText) - parsePrice(b.priceText);
+        case 'price-desc':    return parsePrice(b.priceText) - parsePrice(a.priceText);
+        default:              return 0;
+      }
+    });
+
+    renderTable(filtered);
+
+    document.getElementById('countDisplay').textContent =
+      `Showing ${filtered.length} of ${allItems.length}`;
+    document.getElementById('headerSubtitle').textContent =
+      `${allItems.length} items from ${new Set(allItems.map(i => i.seller).filter(Boolean)).size} sellers`;
+  }
+
+  function parsePrice(text) {
+    const m = String(text || '').match(/[\d,.]+/);
+    return m ? parseFloat(m[0].replace(/,/g, '')) : 0;
+  }
+
+  function renderTable(items) {
+    const tbody = document.getElementById('resultsBody');
+    tbody.innerHTML = '';
+
+    if (items.length === 0) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="9" class="empty-state">No items match the current filters.</td>';
+      tbody.appendChild(tr);
+      return;
+    }
+
+    for (const item of items) {
+      tbody.appendChild(buildRow(item));
+    }
+  }
+
+  function buildRow(item) {
+    const tr = document.createElement('tr');
+
+    const thumb = item.image
+      ? `<img class="thumb" src="${esc(item.image)}" loading="lazy">`
+      : `<div class="thumb-placeholder"></div>`;
+
+    const soldClass  = item.soldCount  > 0 ? 'badge-sold'  : 'badge-zero';
+    const watchClass = item.watchingCount > 0 ? 'badge-watch' : 'badge-zero';
+
+    const scannedDate = item.scannedAt
+      ? new Date(item.scannedAt).toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' })
+      : '—';
+
+    tr.innerHTML = `
+      <td>${thumb}</td>
+      <td>
+        <a class="item-title" href="${esc(item.url)}" target="_blank" rel="noopener"
+           title="${esc(item.title || '')}">${esc(item.title || '—')}</a>
+        <div class="item-id">#${esc(item.itemId)}</div>
+      </td>
+      <td><span class="seller-tag">${esc(item.seller || '—')}</span></td>
+      <td style="font-weight:600;color:#222;">${esc(item.priceText || '—')}</td>
+      <td style="text-align:center;"><span class="badge ${soldClass}">${item.soldCount}</span></td>
+      <td style="text-align:center;"><span class="badge ${watchClass}">${item.watchingCount}</span></td>
+      <td class="date-cell" style="text-align:center;">${scannedDate}</td>
+      <td style="text-align:center;">
+        <a class="link-btn" href="${esc(item.revisionUrl)}" target="_blank" rel="noopener">History</a>
+      </td>
+      <td style="text-align:center;">
+        <button class="del-btn" data-id="${esc(item.itemId)}">Del</button>
+      </td>
+    `;
+
+    tr.querySelector('.del-btn').addEventListener('click', () => deleteItem(item.itemId));
+    return tr;
+  }
+
+  function esc(str) {
+    const d = document.createElement('div');
+    d.textContent = String(str || '');
+    return d.innerHTML;
+  }
+
+  // ── Delete ────────────────────────────────────────────────────────────────────
+  function deleteItem(itemId) {
+    if (!confirm('Remove this item from the scanned list?')) return;
+    allItems = allItems.filter(i => i.itemId !== itemId);
+    chrome.storage.local.set({ scannedItems: allItems }, () => {
+      buildSellerFilter();
+      applyAndRender();
+    });
+  }
+
+  document.getElementById('clearAllBtn').addEventListener('click', () => {
+    if (allItems.length === 0) return;
+    if (!confirm(`Clear all ${allItems.length} scanned items? This cannot be undone.`)) return;
+    allItems = [];
+    chrome.storage.local.set({ scannedItems: [] }, () => {
+      buildSellerFilter();
+      applyAndRender();
+    });
+  });
+
+  // ── Apply filters ─────────────────────────────────────────────────────────────
+  document.getElementById('applyFiltersBtn').addEventListener('click', applyAndRender);
+  ['minSold', 'minWatching'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') applyAndRender();
+    });
+  });
+  document.getElementById('sellerFilter').addEventListener('change', applyAndRender);
+  document.getElementById('sortSelect').addEventListener('change', applyAndRender);
+
+  // ── Export JSON ───────────────────────────────────────────────────────────────
+  document.getElementById('exportJsonBtn').addEventListener('click', () => {
+    if (allItems.length === 0) { alert('Nothing to export'); return; }
+
+    const data = {
+      exportedAt: new Date().toISOString(),
+      totalItems: allItems.length,
+      items: allItems,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    chrome.downloads.download({ url, filename: `ebay-scanned-items-${ts}.json`, saveAs: true }, () => {
+      URL.revokeObjectURL(url);
+    });
+  });
+
+  // ── Export CSV ────────────────────────────────────────────────────────────────
+  document.getElementById('exportCsvBtn').addEventListener('click', () => {
+    if (allItems.length === 0) { alert('Nothing to export'); return; }
+
+    const headers = ['Item ID', 'Title', 'Seller', 'Price', 'Sold', 'Watching', 'Scanned At', 'Item URL', 'Revision URL'];
+    const rows = allItems.map(item => [
+      item.itemId,
+      item.title,
+      item.seller,
+      item.priceText,
+      item.soldCount,
+      item.watchingCount,
+      item.scannedAt,
+      item.url,
+      item.revisionUrl,
+    ].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
+
+    const csv  = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    chrome.downloads.download({ url, filename: `ebay-scanned-items-${ts}.csv`, saveAs: true }, () => {
+      URL.revokeObjectURL(url);
+    });
+  });
+</script>
+</body>
+</html>
