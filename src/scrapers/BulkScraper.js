@@ -410,6 +410,22 @@ export class BulkScraper {
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, 'text/html');
 
+      const variations = DataExtractor.extractVariationsFromDoc(doc);
+      let images = DataExtractor.extractImagesFromDoc(doc);
+
+      // Append all colorImages for all variations (same as single scraping)
+      if (variations.hasVariations && Object.keys(variations.colorImages).length > 0) {
+        const allColorUrls = [...new Set(Object.values(variations.colorImages).flat())];
+        for (const colorUrl of allColorUrls) {
+          if (!images.includes(colorUrl) && DataExtractor._isValidImageUrl(colorUrl)) {
+            images.push(colorUrl);
+          }
+        }
+      }
+      if (variations.sizeChart && variations.sizeChart.type === 'image') {
+        images.push(variations.sizeChart.url);
+      }
+
       const productData = {
         asin: asin,
         url: url,
@@ -418,11 +434,14 @@ export class BulkScraper {
         price: DataExtractor.extractPriceFromDoc(doc),
         deliveryFee: DataExtractor.extractDeliveryFeeFromDoc(doc),
         isPrime: DataExtractor.extractPrimeEligibilityFromDoc(doc),
-        images: DataExtractor.extractImagesFromDoc(doc),
+        images,
         description: DataExtractor.extractDescriptionFromDoc(doc),
         bulletPoints: DataExtractor.extractBulletPointsFromDoc(doc),
         specifications: DataExtractor.extractSpecificationsFromDoc(doc),
-        source: 'amazon' // Add source field
+        variations,
+        deliveryDate: DataExtractor.extractDeliveryDateFromDoc(doc),
+        source: 'amazon',
+        customizedFinalPrice: null
       };
 
       return productData;
@@ -441,7 +460,10 @@ export class BulkScraper {
         description: `Error loading details: ${error.message}`,
         bulletPoints: [],
         specifications: {},
-        source: 'amazon' // Add source field
+        variations: { hasVariations: false, parentAsin: null, dimensions: [], validCombinations: [], colorImages: {}, sizeChart: null },
+        deliveryDate: null,
+        source: 'amazon',
+        customizedFinalPrice: null
       };
     }
   }

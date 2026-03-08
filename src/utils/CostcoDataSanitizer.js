@@ -25,7 +25,7 @@ class CostcoDataSanitizer {
 
     if (sanitized.bulletPoints && Array.isArray(sanitized.bulletPoints)) {
       sanitized.bulletPoints = sanitized.bulletPoints.map(bullet =>
-        this.removeCostcoBranding(bullet)
+        bullet.startsWith('[IMAGE]:') ? bullet : this.removeCostcoBranding(bullet)
       );
     }
 

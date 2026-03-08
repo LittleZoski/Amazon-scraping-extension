@@ -8,21 +8,261 @@ export class DataExtractor {
   // ===== Current Page Extraction =====
 
   static extractProductData() {
+    const variations = this.extractVariations();
+    let images = this.getImages();
+
+    // For variation products, append hiRes colorImages URLs for all colors on top of DOM images
+    if (variations.hasVariations && Object.keys(variations.colorImages).length > 0) {
+      const allColorUrls = [...new Set(Object.values(variations.colorImages).flat())];
+      for (const url of allColorUrls) {
+        if (!images.includes(url) && this._isValidImageUrl(url)) images.push(url);
+      }
+    }
+
+    // Append size chart only if it's a real image URL (table-type has no CDN URL)
+    if (variations.sizeChart && variations.sizeChart.type === 'image') {
+      images = [...images, variations.sizeChart.url];
+    }
+
     return {
       asin: DOMHelpers.extractASIN(),
       title: this.getTitle(),
       price: this.getPrice(),
       deliveryFee: this.getDeliveryFee(),
       isPrime: this.isPrimeEligible(),
-      images: this.getImages(),
+      images,
       description: this.getDescription(),
       bulletPoints: this.getBulletPoints(),
       specifications: this.getSpecifications(),
+      variations,
       url: window.location.href,
       scrapedAt: new Date().toISOString(),
-      source: 'amazon', // Add source field
+      source: 'amazon',
       customizedFinalPrice: null
     };
+  }
+
+  // ===== Variation Extraction =====
+
+  static extractVariations() {
+    const result = {
+      hasVariations: false,
+      parentAsin: null,
+      dimensions: [],
+      validCombinations: [],
+      colorImages: {},
+      sizeChart: null
+    };
+
+    // === PRIMARY: Read swatch <li> elements from static HTML ===
+    // These are always present at document_end regardless of JS execution state.
+    const dimensionUls = document.querySelectorAll('ul[data-a-button-group]');
+    if (!dimensionUls.length) return result;
+
+    const dimensions = [];
+
+    for (const ul of dimensionUls) {
+      let groupData;
+      try {
+        groupData = JSON.parse(ul.getAttribute('data-a-button-group') || '{}');
+      } catch (e) {
+        continue;
+      }
+      const dimName = groupData.name; // e.g. "color_name", "size_name"
+      if (!dimName) continue;
+
+      const cleanName = dimName.replace(/_name$/, ''); // "color", "size"
+      const items = [...ul.querySelectorAll('li[data-asin]')];
+      if (!items.length) continue;
+
+      const values = [];
+      for (const li of items) {
+        const asin = li.getAttribute('data-asin');
+        if (!asin) continue;
+
+        const isSelected = li.getAttribute('data-initiallyselected') === 'true';
+        const isUnavailable = li.getAttribute('data-initiallyunavailable') === 'true';
+
+        const entry = { asin, available: !isUnavailable };
+        if (isSelected) entry.selected = true;
+
+        // Per-swatch price (color swatches carry this; size swatches typically don't)
+        const priceLabel = li.querySelector('.apex-pricetopay-accessibility-label');
+        if (priceLabel) {
+          const m = priceLabel.textContent.match(/\$[\d,]+\.\d{2}/);
+          if (m) entry.price = m[0];
+        }
+
+        if (cleanName === 'color') {
+          const img = li.querySelector('img.swatch-image');
+          if (img) {
+            entry.value = img.getAttribute('alt') || '';
+            // Upgrade swatch thumbnail to full-size (remove _SS64_ / _AC_ size suffix)
+            const src = img.getAttribute('src') || '';
+            entry.swatchImageUrl = src.replace(/\._[A-Z]{2}\d+_\./g, '.').replace(/\._AC_\./, '.');
+          }
+        } else {
+          // Size / Style / other text swatch
+          const textEl = li.querySelector('.swatch-title-text-display');
+          entry.value = textEl ? textEl.textContent.trim() : '';
+        }
+
+        if (entry.value) values.push(entry);
+      }
+
+      if (values.length > 0) {
+        dimensions.push({ name: cleanName, values });
+      }
+    }
+
+    if (!dimensions.length) return result;
+
+    result.hasVariations = true;
+    result.dimensions = dimensions;
+
+    // === ENHANCEMENT 1: hiRes colorImages from ImageBlockBTF script ===
+    const allScripts = [...document.querySelectorAll('script:not([src])')];
+    const imgScript = allScripts.find(s =>
+      s.textContent.includes('"colorImages"') && s.textContent.includes('jQuery.parseJSON')
+    );
+    if (imgScript) {
+      try {
+        const m = imgScript.textContent.match(/jQuery\.parseJSON\('([\s\S]+?)'\s*\)/);
+        if (m) {
+          const data = JSON.parse(m[1].replace(/\\'/g, "'"));
+          if (data.colorImages) {
+            for (const [color, imgs] of Object.entries(data.colorImages)) {
+              const hiRes = imgs.filter(i => i.hiRes).map(i => i.hiRes);
+              if (hiRes.length) result.colorImages[color] = hiRes;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Fallback colorImages: use upgraded swatch URLs for colors not in the script data
+    const colorDim = dimensions.find(d => d.name === 'color');
+    if (colorDim) {
+      for (const v of colorDim.values) {
+        if (v.swatchImageUrl && !result.colorImages[v.value]) {
+          result.colorImages[v.value] = [v.swatchImageUrl];
+        }
+      }
+    }
+
+    // === ENHANCEMENT 2: parentAsin from any inline script ===
+    const parentScript = allScripts.find(s => s.textContent.includes('parentAsin'));
+    if (parentScript) {
+      const m = parentScript.textContent.match(/parentAsin=([A-Z0-9]{10})/);
+      if (m) result.parentAsin = m[1];
+    }
+
+    // === ENHANCEMENT 3: exact valid combinations from twister-js-init-dpx-data ===
+    const twisterEl = document.getElementById('twister-js-init-dpx-data');
+    if (twisterEl) {
+      try {
+        const twisterData = JSON.parse(twisterEl.textContent.trim());
+        const dims = twisterData.sortedDimValuesForAllDims;
+        const sortedVars = twisterData.sortedVariations || [];
+
+        if (dims && sortedVars.length > 0) {
+          const dimKeys = Object.keys(dims);
+          let orderedKeys = [...dimKeys];
+          if (dimKeys.length === 2) {
+            const maxIdx0 = Math.max(...sortedVars.map(c => c[0]));
+            if (maxIdx0 >= dims[dimKeys[0]].length) {
+              orderedKeys = [dimKeys[1], dimKeys[0]];
+            }
+          }
+          result.validCombinations = sortedVars.map(combo => {
+            const combination = {};
+            combo.forEach((dimValueIdx, pos) => {
+              const dimKey = orderedKeys[pos];
+              const val = dims[dimKey]?.[dimValueIdx];
+              if (val) combination[dimKey.replace('_name', '')] = val.dimensionValueDisplayText;
+            });
+            return combination;
+          });
+        }
+      } catch (e) {}
+    }
+
+    // === FALLBACK validCombinations: cross-product of available dimension values ===
+    if (!result.validCombinations.length) {
+      if (dimensions.length >= 2) {
+        const dim0 = dimensions[0];
+        const dim1 = dimensions[1];
+        for (const v0 of dim0.values.filter(v => v.available)) {
+          for (const v1 of dim1.values.filter(v => v.available)) {
+            result.validCombinations.push({ [dim0.name]: v0.value, [dim1.name]: v1.value });
+          }
+        }
+      } else {
+        const dim = dimensions[0];
+        result.validCombinations = dim.values
+          .filter(v => v.available)
+          .map(v => ({ [dim.name]: v.value }));
+      }
+    }
+
+    result.sizeChart = this.extractSizeChart();
+    return result;
+  }
+
+  static extractSizeChart() {
+    // Size chart is pre-rendered inside .a-popover-preload in #sizeChartV2Data_feature_div
+    const wrapper = document.querySelector(
+      '#sizeChartV2Data_feature_div .fit-sizechartv2-tables-wrapper, ' +
+      '#a-popover-sizeGuide .fit-sizechartv2-tables-wrapper, ' +
+      '.fit-sizechartv2-tables-wrapper'
+    );
+
+    if (wrapper) {
+      const charts = this._parseSizeChartTables(wrapper);
+      if (charts.length) {
+        return { type: 'table', data: charts };
+      }
+    }
+
+    // Fallback: some size charts are images directly
+    const chartImg = document.querySelector(
+      '#sizeChartV2Data_feature_div img[src*="media-amazon"], ' +
+      '[id^="a-popover-content"] img[src*="media-amazon"]'
+    );
+    if (chartImg) {
+      return { type: 'image', url: chartImg.src };
+    }
+
+    return null;
+  }
+
+  static _parseSizeChartTables(wrapper) {
+    const charts = [];
+    const sections = [...wrapper.querySelectorAll('[id^="fit-sizechartv2-"]')];
+    const toParse = sections.length > 0 ? sections : [wrapper];
+
+    for (const section of toParse) {
+      const table = section.querySelector('table');
+      if (!table) continue;
+
+      const titleEl = section.querySelector('h5, h4, h3');
+      const allRows = [...table.querySelectorAll('tr')];
+      if (!allRows.length) continue;
+
+      const headers = [...allRows[0].querySelectorAll('th, td')].map(c => c.textContent.trim());
+      const rows = allRows.slice(1).map(row => {
+        const cells = [...row.querySelectorAll('th, td')].map(c => c.textContent.trim());
+        const obj = {};
+        headers.forEach((h, i) => { obj[h] = cells[i] !== undefined ? cells[i] : ''; });
+        return obj;
+      }).filter(row => Object.values(row).some(v => v));
+
+      if (headers.length && rows.length) {
+        charts.push({ title: titleEl ? titleEl.textContent.trim() : '', headers, rows });
+      }
+    }
+
+    return charts;
   }
 
   static getTitle() {
@@ -303,12 +543,16 @@ export class DataExtractor {
     return null;
   }
 
+  static _isValidImageUrl(url) {
+    return url && !/(PKmb|play-button-overlay|overlay-thumb)/i.test(url);
+  }
+
   static getImages() {
     const images = [];
     const mainImage = document.querySelector('#landingImage, #imgBlkFront');
     if (mainImage) {
       const src = mainImage.getAttribute('data-old-hires') || mainImage.getAttribute('src');
-      if (src) images.push(src);
+      if (src && this._isValidImageUrl(src)) images.push(src);
     }
 
     const thumbnails = document.querySelectorAll('#altImages img, .imageThumbnail img');
@@ -316,7 +560,7 @@ export class DataExtractor {
       const src = img.getAttribute('src');
       if (src && !images.includes(src)) {
         const highRes = src.replace(/\._.*_\./, '.');
-        images.push(highRes);
+        if (this._isValidImageUrl(highRes)) images.push(highRes);
       }
     });
 
@@ -324,36 +568,105 @@ export class DataExtractor {
   }
 
   static getDescription() {
-    const selectors = ['#productDescription p', '#feature-bullets', '.a-section.a-spacing-medium'];
-    for (const selector of selectors) {
-      const element = document.querySelector(selector);
-      if (element) return element.textContent.trim();
+    // Collect all paragraph text from the product description section
+    const descDiv = document.querySelector('#productDescription');
+    if (descDiv) {
+      const paragraphs = [...descDiv.querySelectorAll('p')]
+        .map(p => p.textContent.trim())
+        .filter(Boolean);
+      if (paragraphs.length) return paragraphs.join('\n\n');
+      const text = descDiv.textContent.trim();
+      if (text) return text;
+    }
+    // Fallback: #feature-bullets
+    const featureBullets = document.querySelector('#feature-bullets');
+    if (featureBullets) return featureBullets.textContent.trim();
+    // Fallback: .a-section.a-spacing-medium — skip Rufus AI widget and other non-description widgets
+    for (const el of document.querySelectorAll('.a-section.a-spacing-medium')) {
+      if (el.closest('#nile-inline-btf_feature_div') || el.id === 'nile-inline-btf_feature_div') continue;
+      const text = el.textContent.trim();
+      if (text) return text;
     }
     return '';
   }
 
   static getBulletPoints() {
     const bullets = [];
-    const bulletElements = document.querySelectorAll('#feature-bullets li, #featurebullets_feature_div li');
-    bulletElements.forEach(li => {
-      const text = li.textContent.trim();
-      if (text && text.length > 0) {
-        bullets.push(text);
+
+    // Strategy 1: standard feature-bullets section (most products)
+    let items = document.querySelectorAll(
+      '#feature-bullets ul li span.a-list-item, ' +
+      '#featurebullets_feature_div ul li span.a-list-item'
+    );
+
+    // Strategy 2: softlines/fashion products — standalone ul with a-spacing-small
+    if (!items.length) {
+      items = document.querySelectorAll(
+        'ul.a-unordered-list.a-vertical.a-spacing-small li span.a-list-item.a-size-base'
+      );
+    }
+
+    // Strategy 3: broad fallback
+    if (!items.length) {
+      items = document.querySelectorAll('#feature-bullets li, #featurebullets_feature_div li');
+    }
+
+    items.forEach(el => {
+      const text = el.textContent.trim();
+      if (text && !bullets.includes(text)) bullets.push(text);
+    });
+
+    // Extract A+ content images (enhanced brand content below description)
+    const seenUrls = new Set();
+    document.querySelectorAll('.aplus-v2 img, #aplus img').forEach(img => {
+      if (img.closest('.premium-aplus-module-5')) return;
+      let src = (img.getAttribute('data-src') || img.getAttribute('src') || '').trim();
+      if (!src || src.startsWith('data:')) return;
+      // A+ images have a known path prefix. Reconstruct the full canonical URL from the path
+      // so that any variation of truncated/broken domain is corrected.
+      const aplusPath = '/images/S/aplus-media-library-service-media/';
+      const pathIdx = src.indexOf(aplusPath);
+      if (pathIdx !== -1) src = 'https://m.media-amazon.com' + src.slice(pathIdx);
+      if (!src.includes('amazon.com')) return;
+      if (this._isValidImageUrl(src) && !seenUrls.has(src)) {
+        seenUrls.add(src);
+        bullets.push(`[IMAGE]: ${src}`);
       }
     });
+
     return bullets;
   }
 
   static getSpecifications() {
     const specs = {};
-    const specTables = document.querySelectorAll('#productDetails_techSpec_section_1 tr, #productDetails_detailBullets_sections1 tr');
-    specTables.forEach(row => {
+
+    // Strategy 1: product details table (most products)
+    document.querySelectorAll(
+      '#productDetails_techSpec_section_1 tr, #productDetails_detailBullets_sections1 tr'
+    ).forEach(row => {
       const th = row.querySelector('th');
       const td = row.querySelector('td');
       if (th && td) {
-        specs[th.textContent.trim()] = td.textContent.trim();
+        const key = th.textContent.trim();
+        const val = td.textContent.trim();
+        if (key && val) specs[key] = val;
       }
     });
+
+    // Strategy 2: detail bullets list (softlines/fashion products)
+    document.querySelectorAll('#detailBullets_feature_div ul li').forEach(li => {
+      const listItem = li.querySelector('span.a-list-item');
+      if (!listItem) return;
+      const bold = listItem.querySelector('span.a-text-bold, strong');
+      if (!bold) return;
+      const key = bold.textContent.replace(/[\u200e\u200f\s:]+$/g, '').trim();
+      const clone = listItem.cloneNode(true);
+      clone.querySelector('span.a-text-bold, strong')?.remove();
+      clone.querySelectorAll('ul, script, style').forEach(el => el.remove());
+      const val = clone.textContent.trim();
+      if (key && val) specs[key] = val;
+    });
+
     return specs;
   }
 
@@ -554,7 +867,7 @@ export class DataExtractor {
     const mainImage = doc.querySelector('#landingImage, #imgBlkFront');
     if (mainImage) {
       const src = mainImage.getAttribute('data-old-hires') || mainImage.getAttribute('src');
-      if (src) images.push(src);
+      if (src && this._isValidImageUrl(src)) images.push(src);
     }
 
     const thumbnails = doc.querySelectorAll('#altImages img, .imageThumbnail img');
@@ -562,31 +875,253 @@ export class DataExtractor {
       const src = img.getAttribute('src');
       if (src && !images.includes(src)) {
         const highRes = src.replace(/\._.*_\./, '.');
-        images.push(highRes);
+        if (this._isValidImageUrl(highRes)) images.push(highRes);
       }
     });
 
     return images.slice(0, 10);
   }
 
-  static extractDescriptionFromDoc(doc) {
-    const selectors = ['#productDescription p', '#feature-bullets', '.a-section.a-spacing-medium'];
+  static extractDeliveryDateFromDoc(doc) {
+    const selectors = [
+      '#deliveryMessageMirId',
+      '#mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE',
+      '#mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE',
+      '#delivery-message',
+      '#ddmDeliveryMessage'
+    ];
     for (const selector of selectors) {
       const element = doc.querySelector(selector);
-      if (element) return element.textContent.trim();
+      if (element) {
+        const text = element.textContent.trim();
+        const dateMatch = text.match(/(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?,?\s*(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}/i);
+        if (dateMatch) return dateMatch[0];
+      }
+    }
+    return null;
+  }
+
+  static extractVariationsFromDoc(doc) {
+    const result = {
+      hasVariations: false,
+      parentAsin: null,
+      dimensions: [],
+      validCombinations: [],
+      colorImages: {},
+      sizeChart: null
+    };
+
+    const dimensionUls = doc.querySelectorAll('ul[data-a-button-group]');
+    if (!dimensionUls.length) return result;
+
+    const dimensions = [];
+    for (const ul of dimensionUls) {
+      let groupData;
+      try {
+        groupData = JSON.parse(ul.getAttribute('data-a-button-group') || '{}');
+      } catch (e) { continue; }
+      const dimName = groupData.name;
+      if (!dimName) continue;
+      const cleanName = dimName.replace(/_name$/, '');
+      const items = [...ul.querySelectorAll('li[data-asin]')];
+      if (!items.length) continue;
+
+      const values = [];
+      for (const li of items) {
+        const asin = li.getAttribute('data-asin');
+        if (!asin) continue;
+        const isSelected = li.getAttribute('data-initiallyselected') === 'true';
+        const isUnavailable = li.getAttribute('data-initiallyunavailable') === 'true';
+        const entry = { asin, available: !isUnavailable };
+        if (isSelected) entry.selected = true;
+
+        const priceLabel = li.querySelector('.apex-pricetopay-accessibility-label');
+        if (priceLabel) {
+          const m = priceLabel.textContent.match(/\$[\d,]+\.\d{2}/);
+          if (m) entry.price = m[0];
+        }
+
+        if (cleanName === 'color') {
+          const img = li.querySelector('img.swatch-image');
+          if (img) {
+            entry.value = img.getAttribute('alt') || '';
+            const src = img.getAttribute('src') || '';
+            entry.swatchImageUrl = src.replace(/\._[A-Z]{2}\d+_\./g, '.').replace(/\._AC_\./, '.');
+          }
+        } else {
+          const textEl = li.querySelector('.swatch-title-text-display');
+          entry.value = textEl ? textEl.textContent.trim() : '';
+        }
+        if (entry.value) values.push(entry);
+      }
+      if (values.length > 0) dimensions.push({ name: cleanName, values });
+    }
+
+    if (!dimensions.length) return result;
+    result.hasVariations = true;
+    result.dimensions = dimensions;
+
+    // hiRes colorImages from ImageBlockBTF inline script
+    const allScripts = [...doc.querySelectorAll('script:not([src])')];
+    const imgScript = allScripts.find(s =>
+      s.textContent.includes('"colorImages"') && s.textContent.includes('jQuery.parseJSON')
+    );
+    if (imgScript) {
+      try {
+        const m = imgScript.textContent.match(/jQuery\.parseJSON\('([\s\S]+?)'\s*\)/);
+        if (m) {
+          const data = JSON.parse(m[1].replace(/\\'/g, "'"));
+          if (data.colorImages) {
+            for (const [color, imgs] of Object.entries(data.colorImages)) {
+              const hiRes = imgs.filter(i => i.hiRes).map(i => i.hiRes);
+              if (hiRes.length) result.colorImages[color] = hiRes;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Fallback: swatch thumbnail URLs for colors not in script data
+    const colorDim = dimensions.find(d => d.name === 'color');
+    if (colorDim) {
+      for (const v of colorDim.values) {
+        if (v.swatchImageUrl && !result.colorImages[v.value]) {
+          result.colorImages[v.value] = [v.swatchImageUrl];
+        }
+      }
+    }
+
+    // parentAsin
+    const parentScript = allScripts.find(s => s.textContent.includes('parentAsin'));
+    if (parentScript) {
+      const m = parentScript.textContent.match(/parentAsin=([A-Z0-9]{10})/);
+      if (m) result.parentAsin = m[1];
+    }
+
+    // Valid combinations from twister data
+    const twisterEl = doc.getElementById('twister-js-init-dpx-data');
+    if (twisterEl) {
+      try {
+        const twisterData = JSON.parse(twisterEl.textContent.trim());
+        const dims = twisterData.sortedDimValuesForAllDims;
+        const sortedVars = twisterData.sortedVariations || [];
+        if (dims && sortedVars.length > 0) {
+          const dimKeys = Object.keys(dims);
+          let orderedKeys = [...dimKeys];
+          if (dimKeys.length === 2) {
+            const maxIdx0 = Math.max(...sortedVars.map(c => c[0]));
+            if (maxIdx0 >= dims[dimKeys[0]].length) orderedKeys = [dimKeys[1], dimKeys[0]];
+          }
+          result.validCombinations = sortedVars.map(combo => {
+            const combination = {};
+            combo.forEach((dimValueIdx, pos) => {
+              const dimKey = orderedKeys[pos];
+              const val = dims[dimKey]?.[dimValueIdx];
+              if (val) combination[dimKey.replace('_name', '')] = val.dimensionValueDisplayText;
+            });
+            return combination;
+          });
+        }
+      } catch (e) {}
+    }
+
+    // Fallback validCombinations: cross-product of available values
+    if (!result.validCombinations.length) {
+      if (dimensions.length >= 2) {
+        const dim0 = dimensions[0];
+        const dim1 = dimensions[1];
+        for (const v0 of dim0.values.filter(v => v.available)) {
+          for (const v1 of dim1.values.filter(v => v.available)) {
+            result.validCombinations.push({ [dim0.name]: v0.value, [dim1.name]: v1.value });
+          }
+        }
+      } else {
+        const dim = dimensions[0];
+        result.validCombinations = dim.values
+          .filter(v => v.available)
+          .map(v => ({ [dim.name]: v.value }));
+      }
+    }
+
+    result.sizeChart = this.extractSizeChartFromDoc(doc);
+    return result;
+  }
+
+  static extractSizeChartFromDoc(doc) {
+    const wrapper = doc.querySelector(
+      '#sizeChartV2Data_feature_div .fit-sizechartv2-tables-wrapper, ' +
+      '#a-popover-sizeGuide .fit-sizechartv2-tables-wrapper, ' +
+      '.fit-sizechartv2-tables-wrapper'
+    );
+    if (wrapper) {
+      const charts = this._parseSizeChartTables(wrapper);
+      if (charts.length) return { type: 'table', data: charts };
+    }
+    const chartImg = doc.querySelector(
+      '#sizeChartV2Data_feature_div img[src*="media-amazon"], ' +
+      '[id^="a-popover-content"] img[src*="media-amazon"]'
+    );
+    if (chartImg) return { type: 'image', url: chartImg.src };
+    return null;
+  }
+
+  static extractDescriptionFromDoc(doc) {
+    const descDiv = doc.querySelector('#productDescription');
+    if (descDiv) {
+      const paragraphs = [...descDiv.querySelectorAll('p')]
+        .map(p => p.textContent.trim())
+        .filter(Boolean);
+      if (paragraphs.length) return paragraphs.join('\n\n');
+      const text = descDiv.textContent.trim();
+      if (text) return text;
+    }
+    const featureBullets = doc.querySelector('#feature-bullets');
+    if (featureBullets) return featureBullets.textContent.trim();
+    for (const el of doc.querySelectorAll('.a-section.a-spacing-medium')) {
+      if (el.closest('#nile-inline-btf_feature_div') || el.id === 'nile-inline-btf_feature_div') continue;
+      const text = el.textContent.trim();
+      if (text) return text;
     }
     return '';
   }
 
   static extractBulletPointsFromDoc(doc) {
     const bullets = [];
-    const bulletElements = doc.querySelectorAll('#feature-bullets li, #featurebullets_feature_div li');
-    bulletElements.forEach(li => {
-      const text = li.textContent.trim();
-      if (text && text.length > 0) {
-        bullets.push(text);
+
+    // Text bullets — try multiple selectors
+    let items = doc.querySelectorAll(
+      '#feature-bullets ul li span.a-list-item, ' +
+      '#featurebullets_feature_div ul li span.a-list-item'
+    );
+    if (!items.length) {
+      items = doc.querySelectorAll(
+        'ul.a-unordered-list.a-vertical.a-spacing-small li span.a-list-item.a-size-base'
+      );
+    }
+    if (!items.length) {
+      items = doc.querySelectorAll('#feature-bullets li, #featurebullets_feature_div li');
+    }
+    items.forEach(el => {
+      const text = el.textContent.trim();
+      if (text && !bullets.includes(text)) bullets.push(text);
+    });
+
+    // A+ content images — reconstruct full CDN URL from path to fix truncated domains
+    const aplusPath = '/images/S/aplus-media-library-service-media/';
+    const seenUrls = new Set();
+    doc.querySelectorAll('.aplus-v2 img, #aplus img').forEach(img => {
+      if (img.closest('.premium-aplus-module-5')) return;
+      let src = (img.getAttribute('data-src') || img.getAttribute('src') || '').trim();
+      if (!src || src.startsWith('data:')) return;
+      const pathIdx = src.indexOf(aplusPath);
+      if (pathIdx !== -1) src = 'https://m.media-amazon.com' + src.slice(pathIdx);
+      if (!src.includes('amazon.com')) return;
+      if (this._isValidImageUrl(src) && !seenUrls.has(src)) {
+        seenUrls.add(src);
+        bullets.push(`[IMAGE]: ${src}`);
       }
     });
+
     return bullets;
   }
 

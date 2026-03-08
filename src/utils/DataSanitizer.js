@@ -16,7 +16,7 @@ export class DataSanitizer {
 
     if (sanitized.bulletPoints && Array.isArray(sanitized.bulletPoints)) {
       sanitized.bulletPoints = sanitized.bulletPoints.map(bullet =>
-        this.removeAmazonBranding(bullet)
+        bullet.startsWith('[IMAGE]:') ? bullet : this.removeAmazonBranding(bullet)
       );
     }
 

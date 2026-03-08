@@ -37,6 +37,13 @@ export class Validators {
       errors.push('No price available');
     }
 
+    if (productData.deliveryDate) {
+      const daysUntilDelivery = this.calculateDaysUntilDelivery(productData.deliveryDate);
+      if (daysUntilDelivery !== null && daysUntilDelivery > 12) {
+        errors.push(`Delivery too long (${daysUntilDelivery} days)`);
+      }
+    }
+
     if (primeOnly && productData.isPrime === false) {
       errors.push('Not Prime eligible');
     }
