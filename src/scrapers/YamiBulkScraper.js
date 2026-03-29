@@ -171,7 +171,17 @@ class YamiBulkScraper {
           </div>
         </div>
 
-        <div style="display: flex; gap: 10px; margin-top: 25px;">
+        <div style="margin-bottom: 20px; padding: 15px 20px; background: #f0fdf4; border-radius: 8px; border: 2px solid #22c55e;">
+          <label style="display: flex; align-items: center; cursor: pointer;">
+            <input type="checkbox" id="auto-export" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+            <span style="color: #15803d; font-weight: 600;">Auto Export when done</span>
+          </label>
+          <p style="margin: 8px 0 0 28px; font-size: 12px; color: #666;">
+            Automatically download products as JSON when scraping completes
+          </p>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 5px;">
           <button id="start-scrape-btn" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 15px;">
             Start Scraping
           </button>
@@ -259,8 +269,9 @@ class YamiBulkScraper {
       const minPrice = parseInt(minPriceSlider.value);
       const maxPrice = parseInt(maxPriceSlider.value);
 
+      const autoExport = modal.querySelector('#auto-export').checked;
       modal.remove();
-      this.bulkScrapeFromPage(allProducts, count, usePriceFilter, minPrice, maxPrice);
+      this.bulkScrapeFromPage(allProducts, count, usePriceFilter, minPrice, maxPrice, autoExport);
     });
 
     cancelBtn.addEventListener('click', () => modal.remove());
@@ -272,7 +283,7 @@ class YamiBulkScraper {
   /**
    * Execute bulk scraping with filters
    */
-  async bulkScrapeFromPage(allProducts, maxCount, usePriceFilter, minPrice, maxPrice) {
+  async bulkScrapeFromPage(allProducts, maxCount, usePriceFilter, minPrice, maxPrice, autoExport = false) {
     try {
       this.scrapeButton.innerHTML = '⏳ Filtering...';
       this.scrapeButton.disabled = true;
@@ -388,6 +399,11 @@ class YamiBulkScraper {
       }
 
       this.showNotification(resultParts.join(' | '), stopRequested ? 'warning' : 'success');
+
+      if (!stopRequested && successCount > 0 && autoExport) {
+        chrome.runtime.sendMessage({ action: 'AUTO_EXPORT_PRODUCTS', source: 'yami' });
+      }
+
       this.scrapeButton.innerHTML = `✅ Scraped ${successCount}!`;
 
       setTimeout(() => {

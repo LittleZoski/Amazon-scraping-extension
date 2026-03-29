@@ -99,7 +99,7 @@ export class BulkScraper {
     `;
 
     modal.innerHTML = `
-      <div style="background: white; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+      <div style="background: white; border-radius: 16px; padding: 30px; max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3); max-height: 90vh; overflow-y: auto;">
         <h2 style="margin: 0 0 20px 0; color: #333; font-size: 24px;">📦 Bulk Scrape Settings</h2>
 
         <div style="margin-bottom: 25px;">
@@ -166,7 +166,17 @@ export class BulkScraper {
           </div>
         </div>
 
-        <div style="display: flex; gap: 10px; margin-top: 25px;">
+        <div style="margin-bottom: 20px; padding: 15px 20px; background: #f0fdf4; border-radius: 8px; border: 2px solid #22c55e;">
+          <label style="display: flex; align-items: center; cursor: pointer;">
+            <input type="checkbox" id="auto-export" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+            <span style="color: #15803d; font-weight: 600;">Auto Export when done</span>
+          </label>
+          <p style="margin: 8px 0 0 28px; font-size: 12px; color: #666;">
+            Automatically download products as JSON when scraping completes
+          </p>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-top: 5px;">
           <button id="start-scrape-btn" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 15px;">
             Start Scraping
           </button>
@@ -260,9 +270,10 @@ export class BulkScraper {
       const minPrice = parseInt(minPriceSlider.value);
       const maxPrice = parseInt(maxPriceSlider.value);
       const primeOnly = primeOnlyFilter.checked;
+      const autoExport = modal.querySelector('#auto-export').checked;
 
       modal.remove();
-      this.bulkScrapeFromPage(allProducts, count, usePriceFilter, minPrice, maxPrice, primeOnly);
+      this.bulkScrapeFromPage(allProducts, count, usePriceFilter, minPrice, maxPrice, primeOnly, autoExport);
     });
 
     cancelBtn.addEventListener('click', () => modal.remove());
@@ -271,7 +282,7 @@ export class BulkScraper {
     });
   }
 
-  async bulkScrapeFromPage(allProducts, maxCount, usePriceFilter, minPrice, maxPrice, primeOnly = false) {
+  async bulkScrapeFromPage(allProducts, maxCount, usePriceFilter, minPrice, maxPrice, primeOnly = false, autoExport = false) {
     try {
       this.scrapeButton.innerHTML = '⏳ Filtering...';
       this.scrapeButton.disabled = true;
@@ -380,6 +391,11 @@ export class BulkScraper {
       }
 
       UIManager.showNotification(resultParts.join(' | '), stopRequested ? 'warning' : 'success');
+
+      if (!stopRequested && successCount > 0 && autoExport) {
+        chrome.runtime.sendMessage({ action: 'AUTO_EXPORT_PRODUCTS', source: 'amazon' });
+      }
+
       this.scrapeButton.innerHTML = `✅ Scraped ${successCount}!`;
 
       setTimeout(() => {

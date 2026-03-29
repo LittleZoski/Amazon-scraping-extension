@@ -13,6 +13,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     return true; // Keep message channel open for async response
   }
+
+  if (message.action === 'AUTO_EXPORT_PRODUCTS') {
+    chrome.storage.local.get(['scrapedProducts'], (result) => {
+      const products = result.scrapedProducts || [];
+      if (products.length === 0) {
+        sendResponse({ success: false });
+        return;
+      }
+
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        totalProducts: products.length,
+        products
+      };
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const source = message.source || 'amazon';
+      const filename = `${source}-products-${timestamp}.json`;
+
+      // Service workers can't use URL.createObjectURL, so use a data URL
+      const dataUrl = 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportData, null, 2));
+
+      chrome.downloads.download({ url: dataUrl, filename }, () => {
+        chrome.storage.local.set({ scrapedProducts: [] });
+        sendResponse({ success: true, count: products.length });
+      });
+    });
+
+    return true; // Keep message channel open for async response
+  }
 });
 
 /**
