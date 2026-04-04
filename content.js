@@ -2067,11 +2067,11 @@ class BulkScraper {
 
         <div style="margin-bottom: 25px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
           <label style="display: flex; align-items: center; margin-bottom: 15px; cursor: pointer;">
-            <input type="checkbox" id="enable-price-filter" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+            <input type="checkbox" id="enable-price-filter" checked style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
             <span style="color: #333; font-weight: 500;">Enable Price Filter</span>
           </label>
 
-          <div id="price-filter-controls" style="opacity: 0.5; pointer-events: none; transition: opacity 0.3s;">
+          <div id="price-filter-controls" style="opacity: 1; pointer-events: auto; transition: opacity 0.3s;">
             <div style="margin-bottom: 15px;">
               <label style="display: block; color: #666; font-size: 13px; margin-bottom: 8px;">
                 Min Price: $<span id="min-price-value">${minPrice}</span>
@@ -2096,7 +2096,7 @@ class BulkScraper {
 
         <div style="margin-bottom: 25px; padding: 20px; background: #e8f4fd; border-radius: 8px; border: 2px solid #3b82f6;">
           <label style="display: flex; align-items: center; cursor: pointer;">
-            <input type="checkbox" id="prime-only-filter" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+            <input type="checkbox" id="prime-only-filter" checked style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
             <span style="color: #1e40af; font-weight: 600; display: flex; align-items: center;">
               <span style="font-size: 18px; margin-right: 5px;">📦</span>
               Prime Only (Skip non-Prime items)
@@ -2112,7 +2112,7 @@ class BulkScraper {
 
         <div style="margin-bottom: 20px; padding: 15px 20px; background: #f0fdf4; border-radius: 8px; border: 2px solid #22c55e;">
           <label style="display: flex; align-items: center; cursor: pointer;">
-            <input type="checkbox" id="auto-export" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+            <input type="checkbox" id="auto-export" checked style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
             <span style="color: #15803d; font-weight: 600;">Auto Export when done</span>
           </label>
           <p style="margin: 8px 0 0 28px; font-size: 12px; color: #666;">
