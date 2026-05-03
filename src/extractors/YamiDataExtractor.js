@@ -250,23 +250,37 @@ class YamiDataExtractor {
       }
     }
 
-    // Strategy 2: Product image gallery - div[data-observetrack="goods_image"] .item-preview__list li img
-    const itemPreviewList = document.querySelector('[data-observetrack="goods_image"] .item-preview__list');
-    if (itemPreviewList) {
-      const listItems = itemPreviewList.querySelectorAll('li');
-      listItems.forEach((li, liIndex) => {
-        // Try to find all images within this li
-        const imgs = li.querySelectorAll('img');
-        imgs.forEach((img, imgIndex) => {
-          // Try multiple attribute names for image sources
-          // Prioritize data-src over src because lazy-loaded images have lazy.svg in src
-          let src = img.getAttribute('data-src') ||
+    // Strategy 2: Product image gallery container - [data-observetrack="goods_image"]
+    // Query imgs directly from the container (inner list element may vary across site versions)
+    const galleryContainer = document.querySelector('[data-observetrack="goods_image"]');
+    if (galleryContainer) {
+      const imgs = galleryContainer.querySelectorAll('img');
+      imgs.forEach(img => {
+        const src = img.getAttribute('data-src') ||
                     img.dataset?.src ||
                     img.getAttribute('data-lazy') ||
-                    img.dataset?.lazy ||
                     img.getAttribute('data-original') ||
-                    img.dataset?.original ||
                     img.getAttribute('src');
+
+        if (src && !src.includes('lazy.svg') && !src.includes('placeholder') &&
+            !src.includes('data:image') && !src.includes('logo')) {
+          const normalized = YamiDOMHelpers.normalizeURL(src);
+          const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
+          images.add(highRes);
+        }
+      });
+    }
+
+    // Strategy 3: Fallback - any remaining legacy wrapper selectors
+    if (images.size === 0) {
+      const previewList = document.querySelector('.item-preview__wrapper .item-preview__list, .item-preview__list');
+      if (previewList) {
+        previewList.querySelectorAll('img').forEach(img => {
+          const src = img.getAttribute('data-src') ||
+                     img.dataset?.src ||
+                     img.getAttribute('data-lazy') ||
+                     img.getAttribute('data-original') ||
+                     img.getAttribute('src');
 
           if (src && !src.includes('lazy.svg') && !src.includes('placeholder') &&
               !src.includes('data:image') && !src.includes('logo')) {
@@ -274,34 +288,6 @@ class YamiDataExtractor {
             const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
             images.add(highRes);
           }
-        });
-      });
-    }
-
-    // Strategy 3: Fallback - .item-preview__wrapper .item-preview__list li img
-    if (images.size === 0) {
-      const previewList = document.querySelector('.item-preview__wrapper .item-preview__list');
-      if (previewList) {
-        const listItems = previewList.querySelectorAll('li');
-        listItems.forEach((li, liIndex) => {
-          const imgs = li.querySelectorAll('img');
-          imgs.forEach((img, imgIndex) => {
-            // Prioritize data-src over src because lazy-loaded images have lazy.svg in src
-            const src = img.getAttribute('data-src') ||
-                       img.dataset?.src ||
-                       img.getAttribute('data-lazy') ||
-                       img.dataset?.lazy ||
-                       img.getAttribute('data-original') ||
-                       img.dataset?.original ||
-                       img.getAttribute('src');
-
-            if (src && !src.includes('lazy.svg') && !src.includes('placeholder') &&
-                !src.includes('data:image') && !src.includes('logo')) {
-              const normalized = YamiDOMHelpers.normalizeURL(src);
-              const highRes = YamiDOMHelpers.getHighResImageURL(normalized);
-              images.add(highRes);
-            }
-          });
         });
       }
     }
@@ -965,7 +951,7 @@ class YamiDataExtractor {
     const productLinks = [];
     const seenIDs = new Set();
 
-    // Primary selector: Category items with data-goods_id
+    // Primary selector: legacy category items with data-goods_id attribute
     const categoryCards = document.querySelectorAll('.category-items div[data-goods_id]');
 
     if (categoryCards.length > 0) {
@@ -973,8 +959,6 @@ class YamiDataExtractor {
         const goodsId = card.getAttribute('data-goods_id');
         if (goodsId && !seenIDs.has(goodsId)) {
           seenIDs.add(goodsId);
-
-          // Find the product link within this card
           const link = card.querySelector('a[href*="/p/"]');
           if (link) {
             productLinks.push({
@@ -985,37 +969,34 @@ class YamiDataExtractor {
           }
         }
       });
-    } else {
-      // Fallback selectors for other page types
-      const selectors = [
-        '.bff-item a[href*="/p/"]',
-        '.product-card a[href*="/p/"]',
-        'a[href*="/p/"]'
-      ];
+    }
 
-      selectors.forEach(selector => {
-        const links = document.querySelectorAll(selector);
+    // Universal fallback: scan all /p/ links on the page.
+    // Safe to do here because this function is only called from YamiBulkScraper,
+    // which only runs on category/search pages (never on product detail pages).
+    // Yami now uses Next.js CSS Modules so stable class names are not reliable.
+    if (productLinks.length === 0) {
+      const allLinks = document.querySelectorAll('a[href*="/p/"]');
 
-        links.forEach(link => {
-          const href = link.getAttribute('href');
-          if (!href) return;
+      allLinks.forEach(link => {
+        const href = link.getAttribute('href');
+        if (!href) return;
 
-          // Extract product ID from URL pattern: /p/{slug}/{id}
-          const idMatch = href.match(/\/p\/[^\/]+\/(\d+)/);
-          if (idMatch && !seenIDs.has(idMatch[1])) {
-            const productID = idMatch[1];
-            seenIDs.add(productID);
+        // Match /p/{slug}/{numeric-id} — works with or without /en/ locale prefix
+        const idMatch = href.match(/\/p\/[^/?#]+\/(\d+)/);
+        if (!idMatch) return;
 
-            const listingElement = YamiDOMHelpers.closest(link, '.bff-item') ||
-                                    YamiDOMHelpers.closest(link, '.product-card') ||
-                                    YamiDOMHelpers.closest(link, '[data-qa="product"]');
+        const productID = idMatch[1];
+        if (seenIDs.has(productID)) return;
+        seenIDs.add(productID);
 
-            productLinks.push({
-              productID: productID,
-              url: YamiDOMHelpers.normalizeURL(href),
-              element: listingElement
-            });
-          }
+        // Walk up to find the card container (any element that is a direct list child)
+        const card = link.closest('li') || link.closest('article') || link.parentElement;
+
+        productLinks.push({
+          productID,
+          url: YamiDOMHelpers.normalizeURL(href),
+          element: card
         });
       });
     }

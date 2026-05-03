@@ -127,8 +127,8 @@ class YamiDOMHelpers {
       for (const script of scripts) {
         try {
           const data = JSON.parse(script.textContent);
-
-          if (data['@type'] === 'Product' || data.itemListElement) {
+          // Only return Product schema — BreadcrumbList and other types are not useful here
+          if (data['@type'] === 'Product') {
             return data;
           }
         } catch (e) {

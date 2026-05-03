@@ -89,8 +89,11 @@ class YamiBulkScraper {
   createSettingsModal(allProducts) {
     // Extract metadata from product cards on the page
     const productsWithMetadata = allProducts.map(p => {
-      // Correct selector for Yami category pages: .item-card__price-info .price-normal.price-valid.word-bold-price
-      const priceElement = p.element?.querySelector('.item-card__price-info .price-normal.price-valid.word-bold-price') ||
+      // Yami now uses CSS Modules (hashed class names like itemCard_salePrice__GDxxg)
+      // Use attribute-contains selector to match any class that starts with a known prefix
+      const priceElement = p.element?.querySelector('[class*="salePrice"]') ||
+                          p.element?.querySelector('[class*="priceShop"]') ||
+                          p.element?.querySelector('[class*="price-shop"]') ||
                           p.element?.querySelector('.price-normal.price-valid.word-bold-price') ||
                           p.element?.querySelector('.price-valid');
       const priceText = priceElement?.textContent?.trim();

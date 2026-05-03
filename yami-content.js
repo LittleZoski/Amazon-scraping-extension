@@ -13,6 +13,7 @@
 class YamiScraperApp {
   constructor() {
     this.primeOnlyMode = false; // For Yami: "Fulfilled by Yami" filter
+    this.currentUrl = window.location.href;
     this.init();
   }
 
@@ -33,6 +34,47 @@ class YamiScraperApp {
     } else {
       this.injectScraper();
     }
+
+    // Handle SPA navigation (Yami uses client-side routing)
+    this.watchForUrlChanges();
+  }
+
+  /**
+   * Watch for URL changes caused by SPA navigation and re-initialize
+   */
+  watchForUrlChanges() {
+    // Listen for popstate (back/forward navigation)
+    window.addEventListener('popstate', () => this.onUrlChange());
+
+    // Patch pushState and replaceState to detect programmatic navigation
+    const origPushState = history.pushState.bind(history);
+    const origReplaceState = history.replaceState.bind(history);
+
+    history.pushState = (...args) => {
+      origPushState(...args);
+      this.onUrlChange();
+    };
+    history.replaceState = (...args) => {
+      origReplaceState(...args);
+      this.onUrlChange();
+    };
+  }
+
+  /**
+   * Called when the URL changes due to SPA navigation
+   */
+  onUrlChange() {
+    const newUrl = window.location.href;
+    if (newUrl === this.currentUrl) return;
+    this.currentUrl = newUrl;
+
+    // Remove any existing scraper buttons
+    const existing = document.getElementById('yami-scraper-btn') ||
+                     document.getElementById('yami-bulk-scraper-btn');
+    if (existing) existing.remove();
+
+    // Wait briefly for the new page content to render, then re-detect
+    setTimeout(() => this.injectScraper(), 800);
   }
 
   /**
